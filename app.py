@@ -16,6 +16,11 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
+
+def clean_str(s):
+  return "".join(c if c.isalnum() else "_" for c in str(s))
+
+
 # Sidebar for file upload
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
@@ -171,11 +176,7 @@ if st.button(
         col_jw
     ].sum()
     df_pair.rename(
-        columns={
-            col_guru: "Guru",
-            col_kelas: "Kelas",
-            col_jw: "Jam_Wajib",
-        },
+        columns={col_guru: "Guru", col_kelas: "Kelas", col_jw: "Jam_Wajib"},
         inplace=True,
     )
     df_pair = df_pair[df_pair["Jam_Wajib"] > 0].copy()
@@ -195,9 +196,7 @@ if st.button(
     col_mgmp_mapel = find_col(
         df_mgmp_rule, ["Mata_Pelajaran", "Mapel", "Mata Pelajaran"]
     )
-    col_mgmp_hari = find_col(
-        df_mgmp_rule, ["Hari_MGMP", "Hari MGMP", "Hari"]
-    )
+    col_mgmp_hari = find_col(df_mgmp_rule, ["Hari_MGMP", "Hari MGMP", "Hari"])
 
     HARI_MGMP_MAPEL = dict(
         zip(
@@ -236,32 +235,74 @@ if st.button(
     # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
+    # 1. Decision Variables: x(g, k, h, j)
     var_keys = [
         (g, k, h, j)
         for (g, k) in valid_gk_pairs
         for h in HARI
         for j in JAM_HARI[h]
     ]
-    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
+    x = {
+        (g, k, h, j): pulp.LpVariable(
+            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
+            cat=pulp.LpBinary,
+        )
+        for (g, k, h, j) in var_keys
+    }
 
-    pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = pulp.LpVariable.dicts("dpair_minus", pair_keys, lowBound=0)
-    d_pair_plus = pulp.LpVariable.dicts("dpair_plus", pair_keys, lowBound=0)
+    # 2. Workload deviation variables
+    pair_keys = list(valid_gk_pairs)
+    d_pair_minus = {
+        (g, k): pulp.LpVariable(
+            f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
+    d_pair_plus = {
+        (g, k): pulp.LpVariable(
+            f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
 
+    # 3. Class empty deviation variables
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
+    d_c2_minus = {
+        (k, h, j): pulp.LpVariable(
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+        )
+        for (k, h, j) in c2_keys
+    }
 
+    # 4. Teacher daily workload variables
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
-    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
+    d_h_plus = {
+        (g, h): pulp.LpVariable(
+            f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
+    d_h_minus = {
+        (g, h): pulp.LpVariable(
+            f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
 
+    # 5. Gap variables
     gap_keys = []
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
+    z_gap = {
+        key: pulp.LpVariable(
+            f"z_gap_{clean_str(key[0])}_{clean_str(key[1])}_{clean_str(key[2])}_{key[3]}",
+            lowBound=0,
+        )
+        for key in gap_keys
+    }
 
     # Constraints
     for g in mgmp_teachers:
@@ -331,7 +372,7 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(f"penalti_wali_{g}", lowBound=0)
+            p_c6 = pulp.LpVariable(f"penalti_wali_{clean_str(g)}", lowBound=0)
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -366,7 +407,8 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{g}_{h}_{k}_{j}", lowBound=0
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
+                    lowBound=0,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
