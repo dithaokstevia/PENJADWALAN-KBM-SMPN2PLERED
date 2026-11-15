@@ -18,9 +18,12 @@ st.markdown(
 
 
 def clean_str(s):
+  if s is None or pd.isna(s):
+    return "X"
   if isinstance(s, (tuple, list)):
-    s = "_".join(str(x) for x in s)
-  return "".join(c if c.isalnum() else "_" for c in str(s)).strip("_")
+    s = "_".join(str(x) for x in s if pd.notna(x))
+  res = "".join(c if c.isalnum() else "_" for c in str(s)).strip("_")
+  return res if res else "X"
 
 
 def flatten_columns(df):
@@ -252,7 +255,10 @@ if st.button(
     JAM_HARI = {}
     for _, r in df_config.iterrows():
       h_name = str(r[col_hari]).strip()
-      j_count = int(r[col_jam_count])
+      try:
+        j_count = int(float(r[col_jam_count]))
+      except Exception:
+        j_count = 6
       JAM_HARI[h_name] = list(range(1, j_count + 1))
 
     col_mgmp_mapel = find_col(
@@ -321,10 +327,8 @@ if st.button(
     ]
     x = {
         (g, k, h, j): pulp.LpVariable(
-            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
-            0,
-            1,
-            pulp.LpInteger,
+            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
+            cat=pulp.LpBinary,
         )
         for (g, k, h, j) in var_keys
     }
@@ -333,16 +337,13 @@ if st.button(
     pair_keys = [(str(g), str(k)) for (g, k) in valid_gk_pairs]
     d_pair_minus = {
         (g, k): pulp.LpVariable(
-            f"dp_minus_{clean_str(g)}_{clean_str(k)}",
-            0,
-            None,
-            pulp.LpContinuous,
+            f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
         )
         for (g, k) in pair_keys
     }
     d_pair_plus = {
         (g, k): pulp.LpVariable(
-            f"dp_plus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
+            f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
         )
         for (g, k) in pair_keys
     }
@@ -356,10 +357,7 @@ if st.button(
     ]
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}",
-            0,
-            None,
-            pulp.LpContinuous,
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
         )
         for (k, h, j) in c2_keys
     }
@@ -368,16 +366,13 @@ if st.button(
     dh_keys = [(str(g), str(h)) for g in GURU for h in HARI]
     d_h_plus = {
         (g, h): pulp.LpVariable(
-            f"dh_plus_{clean_str(g)}_{clean_str(h)}", 0, None, pulp.LpContinuous
+            f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
         )
         for (g, h) in dh_keys
     }
     d_h_minus = {
         (g, h): pulp.LpVariable(
-            f"dh_minus_{clean_str(g)}_{clean_str(h)}",
-            0,
-            None,
-            pulp.LpContinuous,
+            f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
         )
         for (g, h) in dh_keys
     }
@@ -392,10 +387,7 @@ if st.button(
 
     z_gap = {
         (g, k, h, j): pulp.LpVariable(
-            f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
-            0,
-            None,
-            pulp.LpContinuous,
+            f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
         )
         for (g, k, h, j) in gap_keys
     }
@@ -410,31 +402,31 @@ if st.button(
       for m_name in mapel_list:
         h_mgmp = HARI_MGMP_MAPEL.get(m_name)
         if h_mgmp and h_mgmp in HARI:
-          assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
           for k in assigned_k:
             for j in JAM_HARI[h_mgmp]:
               if j > 2:
-                model += x[g, k, h_mgmp, j] == 0
+                model += x[(g, k, h_mgmp, j)] == 0
 
     penalti_list = []
 
     # C1: Max 1 Class per Teacher per Period
     for g in GURU:
-      assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+      assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
       if assigned_k:
         for h in HARI:
           for j in JAM_HARI[h]:
-            model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
+            model += pulp.lpSum([x[(g, k_i, h, j)] for k_i in assigned_k]) <= 1
 
     # C2: Exactly 1 Teacher per Class per Period
     for k in KELAS:
-      assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
+      assigned_g = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
         for h in HARI:
           for j in JAM_HARI[h]:
             model += (
-                pulp.lpSum([x[g, k, h, j] for g in assigned_g])
-                + d_c2_minus[k, h, j]
+                pulp.lpSum([x[(g_i, k, h, j)] for g_i in assigned_g])
+                + d_c2_minus[(k, h, j)]
                 == 1
             )
 
@@ -442,9 +434,9 @@ if st.button(
     for _, row in df_pair.iterrows():
       g, k, jw = str(row["Guru"]), str(row["Kelas"]), int(row["Jam_Wajib"])
       model += (
-          pulp.lpSum([x[g, k, h, j] for h in HARI for j in JAM_HARI[h]])
-          + d_pair_minus[g, k]
-          - d_pair_plus[g, k]
+          pulp.lpSum([x[(g, k, h, j)] for h in HARI for j in JAM_HARI[h]])
+          + d_pair_minus[(g, k)]
+          - d_pair_plus[(g, k)]
           == jw
       )
 
@@ -455,7 +447,10 @@ if st.button(
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
           model += (
-              x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1]
+              x[(g, k, h, j1)]
+              + x[(g, k, h, j3)]
+              - x[(g, k, h, j2)]
+              - z_gap[(g, k, h, j1)]
               <= 1
           )
 
@@ -474,10 +469,10 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(
-                f"penalti_wali_{clean_str(g)}", 0, None, pulp.LpContinuous
+                f"penalti_wali_{clean_str(g)}", lowBound=0
             )
             penalti_list.append(p_c6)
-            model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
+            model += x[(g, k_wali, "Jumat", 1)] + p_c6 >= 1
 
     # C7: Vice Principal (Wakasek) Max 1 at Period 1
     wakasek_teachers = [
@@ -493,7 +488,7 @@ if st.button(
     if wakasek_pairs:
       for h in HARI:
         model += (
-            pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) <= 1
+            pulp.lpSum([x[(g_w, k, h, 1)] for (g_w, k) in wakasek_pairs]) <= 1
         )
 
     # C8: PE Teachers (PJOK) Periods 1-4 Only
@@ -506,32 +501,30 @@ if st.button(
           "Y",
           "YES",
       ]:
-        assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
         for h in HARI:
-          for k in assigned_k:
+          for k_i in assigned_k:
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
-                    0,
-                    None,
-                    pulp.LpContinuous,
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j}",
+                    lowBound=0,
                 )
                 penalti_list.append(p_c8)
-                model += x[g, k, h, j] - p_c8 <= 0
+                model += x[(g, k_i, h, j)] - p_c8 <= 0
 
     # Objective Function
     model += (
         100000.0
         * pulp.lpSum(
-            [d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys]
+            [d_pair_minus[(g, k)] + d_pair_plus[(g, k)] for (g, k) in pair_keys]
         )
-        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for (k, h, j) in c2_keys])
-        + 50000.0 * pulp.lpSum([z_gap[key] for key in z_gap])
+        + 10000.0 * pulp.lpSum([d_c2_minus[(k, h, j)] for (k, h, j) in c2_keys])
+        + 50000.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
         + 1000.0 * pulp.lpSum(penalti_list)
         + 2.0
         * pulp.lpSum([
-            d_h_plus[g, h] + d_h_minus[g, h] for g in GURU for h in HARI
+            d_h_plus[(g, h)] + d_h_minus[(g, h)] for g in GURU for h in HARI
         ])
     )
 
