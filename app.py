@@ -17,8 +17,13 @@ st.markdown(
 )
 
 
-# Helper function untuk membuat variabel PuLP yang 100% aman di semua lingkungan
-def buat_kamus_variabel(prefix, indices, low_bound=None, cat="Continuous"):
+# Helper function untuk membersihkan nama string
+def clean_str(s):
+  return "".join(c if c.isalnum() else "_" for c in str(s))
+
+
+# Helper function untuk membuat variabel PuLP yang 100% aman di semua versi PuLP & Streamlit
+def buat_kamus_variabel(prefix, indices, is_binary=False):
   var_dict = {}
   for idx in indices:
     clean_idx_str = (
@@ -30,7 +35,12 @@ def buat_kamus_variabel(prefix, indices, low_bound=None, cat="Continuous"):
         .replace(",", "_")
     )
     var_name = f"{prefix}_{clean_idx_str}"
-    var_dict[idx] = pulp.LpVariable(var_name, low_bound, None, cat)
+    if is_binary:
+      var_dict[idx] = pulp.LpVariable(name=var_name, cat=pulp.LpBinary)
+    else:
+      var_dict[idx] = pulp.LpVariable(
+          name=var_name, lowBound=0, cat=pulp.LpContinuous
+      )
   return var_dict
 
 
@@ -66,7 +76,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM": [1, 2],
+          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
       })
   )
   df_mgmp_init = (
@@ -217,28 +227,18 @@ if st.button(
         for j in JAM_HARI[h]
     ]
 
-    x = buat_kamus_variabel("x", var_keys, cat="Binary")
+    x = buat_kamus_variabel("x", var_keys, is_binary=True)
 
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = buat_kamus_variabel(
-        "dp_minus", pair_keys, low_bound=0, cat="Continuous"
-    )
-    d_pair_plus = buat_kamus_variabel(
-        "dp_plus", pair_keys, low_bound=0, cat="Continuous"
-    )
+    d_pair_minus = buat_kamus_variabel("dp_minus", pair_keys, is_binary=False)
+    d_pair_plus = buat_kamus_variabel("dp_plus", pair_keys, is_binary=False)
 
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = buat_kamus_variabel(
-        "dc2_minus", c2_keys, low_bound=0, cat="Continuous"
-    )
+    d_c2_minus = buat_kamus_variabel("dc2_minus", c2_keys, is_binary=False)
 
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = buat_kamus_variabel(
-        "dh_plus", dh_keys, low_bound=0, cat="Continuous"
-    )
-    d_h_minus = buat_kamus_variabel(
-        "dh_minus", dh_keys, low_bound=0, cat="Continuous"
-    )
+    d_h_plus = buat_kamus_variabel("dh_plus", dh_keys, is_binary=False)
+    d_h_minus = buat_kamus_variabel("dh_minus", dh_keys, is_binary=False)
 
     gap_keys = []
     for g, k in valid_gk_pairs:
@@ -246,9 +246,7 @@ if st.button(
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = buat_kamus_variabel(
-        "z_gap", gap_keys, low_bound=0, cat="Continuous"
-    )
+    z_gap = buat_kamus_variabel("z_gap", gap_keys, is_binary=False)
 
     # Kendala Guru Perwakilan MGMP (Dikosongkan Jam > 2 pada Hari MGMP)
     for g in mgmp_teachers:
@@ -324,7 +322,9 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(
-                f"penalti_wali_{g}", 0, None, "Continuous"
+                name=f"penalti_wali_{clean_str(g)}",
+                lowBound=0,
+                cat=pulp.LpContinuous,
             )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
@@ -365,7 +365,11 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{g}_{h}_{k}_{j}", 0, None, "Continuous"
+                    name=(
+                        f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}"
+                    ),
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
