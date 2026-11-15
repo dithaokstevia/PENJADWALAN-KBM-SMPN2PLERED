@@ -202,9 +202,7 @@ if st.button(
       for h in HARI:
         for j in JAM_HARI[h]:
           var_name = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}"
-          x[g, k, h, j] = pulp.LpVariable(
-              name=var_name, lowBound=0, upBound=1, cat=pulp.LpBinary
-          )
+          x[g, k, h, j] = pulp.LpVariable(var_name, cat=pulp.LpBinary)
 
     # 2. Variabel Deviasi Jam Wajib (d_pair)
     pair_keys = list(valid_gk_pairs)
@@ -212,14 +210,10 @@ if st.button(
     d_pair_plus = {}
     for g, k in pair_keys:
       d_pair_minus[g, k] = pulp.LpVariable(
-          name=f"dp_minus_{clean_str(g)}_{clean_str(k)}",
-          lowBound=0,
-          cat=pulp.LpContinuous,
+          f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
       )
       d_pair_plus[g, k] = pulp.LpVariable(
-          name=f"dp_plus_{clean_str(g)}_{clean_str(k)}",
-          lowBound=0,
-          cat=pulp.LpContinuous,
+          f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
       )
 
     # 3. Variabel Deviasi Kelas Kosong (d_c2)
@@ -227,9 +221,7 @@ if st.button(
     d_c2_minus = {}
     for k, h, j in c2_keys:
       d_c2_minus[k, h, j] = pulp.LpVariable(
-          name=f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}",
-          lowBound=0,
-          cat=pulp.LpContinuous,
+          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}", lowBound=0
       )
 
     # 4. Variabel Jam Kerja Guru (d_h)
@@ -238,14 +230,10 @@ if st.button(
     d_h_minus = {}
     for g, h in dh_keys:
       d_h_plus[g, h] = pulp.LpVariable(
-          name=f"dh_plus_{clean_str(g)}_{clean_str(h)}",
-          lowBound=0,
-          cat=pulp.LpContinuous,
+          f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
       )
       d_h_minus[g, h] = pulp.LpVariable(
-          name=f"dh_minus_{clean_str(g)}_{clean_str(h)}",
-          lowBound=0,
-          cat=pulp.LpContinuous,
+          f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
       )
 
     # 5. Variabel Gap (Jeda Jam)
@@ -258,9 +246,7 @@ if st.button(
     z_gap = {}
     for g, k, h, j in gap_keys:
       z_gap[g, k, h, j] = pulp.LpVariable(
-          name=f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
-          lowBound=0,
-          cat=pulp.LpContinuous,
+          f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}", lowBound=0
       )
 
     # KENDALA-KENDALA (CONSTRAINTS)
@@ -338,11 +324,7 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(
-                name=f"penalti_wali_{clean_str(g)}",
-                lowBound=0,
-                cat=pulp.LpContinuous,
-            )
+            p_c6 = pulp.LpVariable(f"penalti_wali_{clean_str(g)}", lowBound=0)
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -379,9 +361,8 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    name=f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
                     lowBound=0,
-                    cat=pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
