@@ -16,11 +16,6 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
-
-def clean_str(s):
-  return "".join(c if c.isalnum() else "_" for c in str(s))
-
-
 # Sidebar for file upload
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
@@ -40,12 +35,12 @@ else:
 
 if excel_path is None:
   st.warning(
-      "⚠️ Silakan unggah file Excel `data_jadwal(1).xlsx` atau `data_jadwal.xlsx`"
+      "⚠️ Silakan unggah file Excel `data_jadwal.xlsx` atau `data_jadwal(1).xlsx`"
       " di sidebar untuk memulai."
   )
   st.stop()
 
-# Membaca sheet Excel
+# Load sheets
 try:
   xls = pd.ExcelFile(excel_path)
   df_config_init = (
@@ -118,14 +113,14 @@ with tab_beban:
 
 st.divider()
 
-# Tombol Eksekusi Solver
+# Solver Execution Button
 if st.button(
     "🚀 Jalankan Optimasi Jadwal (BIP 0-1)",
     type="primary",
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
-    # Preprocess Data Beban Guru (Forward Fill untuk merged cells)
+    # Preprocess Data
     df_beban_raw["Guru"] = (
         df_beban_raw["Guru"].replace(r"^\s*$", None, regex=True).ffill()
     )
@@ -194,72 +189,49 @@ if st.button(
       ]:
         mgmp_teachers.add(g)
 
-    # Membangun Model Optimasi PuLP
+    # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    # 1. Variabel Keputusan biner (x_g_k_h_j) - Menggunakan 4 Argumen Posisional (name, lowBound, upBound, cat)
-    x = {}
-    for g, k in valid_gk_pairs:
-      for h in HARI:
-        for j in JAM_HARI[h]:
-          v_name = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
-          x[g, k, h, j] = pulp.LpVariable(v_name, 0, 1, pulp.LpBinary)
+    var_keys = [
+        (g, k, h, j)
+        for (g, k) in valid_gk_pairs
+        for h in HARI
+        for j in JAM_HARI[h]
+    ]
+    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
 
-    # 2. Variabel Deviasi Jam Wajib (d_pair)
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = {}
-    d_pair_plus = {}
-    for g, k in pair_keys:
-      d_pair_minus[g, k] = pulp.LpVariable(
-          f"dp_minus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
-      )
-      d_pair_plus[g, k] = pulp.LpVariable(
-          f"dp_plus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
-      )
+    d_pair_minus = pulp.LpVariable.dicts(
+        "dpair_minus", pair_keys, lowBound=0, cat=pulp.LpContinuous
+    )
+    d_pair_plus = pulp.LpVariable.dicts(
+        "dpair_plus", pair_keys, lowBound=0, cat=pulp.LpContinuous
+    )
 
-    # 3. Variabel Deviasi Kelas Kosong (d_c2)
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = {}
-    for k, h, j in c2_keys:
-      d_c2_minus[k, h, j] = pulp.LpVariable(
-          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}",
-          0,
-          None,
-          pulp.LpContinuous,
-      )
+    d_c2_minus = pulp.LpVariable.dicts(
+        "dc2_minus", c2_keys, lowBound=0, cat=pulp.LpContinuous
+    )
 
-    # 4. Variabel Jam Kerja Guru (d_h)
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = {}
-    d_h_minus = {}
-    for g, h in dh_keys:
-      d_h_plus[g, h] = pulp.LpVariable(
-          f"dh_plus_{clean_str(g)}_{clean_str(h)}", 0, None, pulp.LpContinuous
-      )
-      d_h_minus[g, h] = pulp.LpVariable(
-          f"dh_minus_{clean_str(g)}_{clean_str(h)}", 0, None, pulp.LpContinuous
-      )
+    d_h_plus = pulp.LpVariable.dicts(
+        "dh_plus", dh_keys, lowBound=0, cat=pulp.LpContinuous
+    )
+    d_h_minus = pulp.LpVariable.dicts(
+        "dh_minus", dh_keys, lowBound=0, cat=pulp.LpContinuous
+    )
 
-    # 5. Variabel Gap (Jeda Jam)
     gap_keys = []
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
+    z_gap = pulp.LpVariable.dicts(
+        "z_gap", gap_keys, lowBound=0, cat=pulp.LpContinuous
+    )
 
-    z_gap = {}
-    for g, k, h, j in gap_keys:
-      z_gap[g, k, h, j] = pulp.LpVariable(
-          f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
-          0,
-          None,
-          pulp.LpContinuous,
-      )
-
-    # KENDALA (CONSTRAINTS)
-
-    # Kendala MGMP (Guru MGMP tidak mengajar jam > 2 pada hari MGMP)
+    # Constraints
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
       mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -277,7 +249,6 @@ if st.button(
 
     penalti_list = []
 
-    # C1: Max 1 Kelas per Guru per Jam
     for g in GURU:
       assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
       if assigned_k:
@@ -285,7 +256,6 @@ if st.button(
           for j in JAM_HARI[h]:
             model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
 
-    # C2: Tepat 1 Guru per Kelas per Jam
     for k in KELAS:
       assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
@@ -297,7 +267,6 @@ if st.button(
                 == 1
             )
 
-    # C3: Target Jam Wajib Pasangan (Guru, Kelas)
     for _, row in df_pair.iterrows():
       g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
       model += (
@@ -307,7 +276,6 @@ if st.button(
           == jw
       )
 
-    # C4: Block Teaching Kontinu (Tanpa Jeda)
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
@@ -318,7 +286,6 @@ if st.button(
               <= 1
           )
 
-    # C6: Wali Kelas (Mengajar jam ke-1 di hari Jumat)
     for g in GURU:
       st_info = status_dict.get(g, {})
       is_wali_val = st_info.get("Is_Wali")
@@ -333,12 +300,11 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(
-                f"penalti_wali_{clean_str(g)}", 0, None, pulp.LpContinuous
+                f"penalti_wali_{g}", lowBound=0, cat=pulp.LpContinuous
             )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # C7: Wakasek (Bergantian mengajar jam ke-1)
     wakasek_teachers = [
         g
         for g in GURU
@@ -358,7 +324,6 @@ if st.button(
             <= 1
         )
 
-    # C8: Guru PJOK (Hanya jam 1 s.d. 4)
     for g in GURU:
       is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
       if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
@@ -374,15 +339,13 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
-                    0,
-                    None,
-                    pulp.LpContinuous,
+                    f"penalti_pjok_{g}_{h}_{k}_{j}",
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
-    # FUNGSI TUJUAN (OBJECTIVE FUNCTION)
     model += (
         100000.0
         * pulp.lpSum(
@@ -411,7 +374,7 @@ if st.button(
 
       st.success("🎉 OPTIMASI SELESAI & BERHASIL!")
 
-      # Metric Ringkas
+      # Summary Metrics
       col1, col2, col3 = st.columns(3)
       col1.metric("Total Guru Terjadwal", len(GURU))
       col2.metric("Total Kelas (Rombel)", len(KELAS))
@@ -441,7 +404,7 @@ if st.button(
         st.subheader("Tabel Detail Penugasan")
         st.dataframe(df_hasil, use_container_width=True)
 
-      # Tombol Unduh Excel
+      # Download Option
       output = io.BytesIO()
       with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_hasil.to_excel(writer, sheet_name="Data_Penugasan", index=False)
