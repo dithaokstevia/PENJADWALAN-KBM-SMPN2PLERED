@@ -48,7 +48,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM":,
+          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
       })
   )
   df_mgmp_init = (
