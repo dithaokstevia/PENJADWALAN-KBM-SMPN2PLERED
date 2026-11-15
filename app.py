@@ -16,16 +16,6 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
-
-def clean_str(s):
-  if s is None or pd.isna(s):
-    return "X"
-  if isinstance(s, (tuple, list)):
-    s = "_".join(str(x) for x in s if pd.notna(x))
-  res = "".join(c if c.isalnum() else "_" for c in str(s)).strip("_")
-  return res if res else "X"
-
-
 # Sidebar for file upload
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
@@ -50,6 +40,16 @@ if excel_path is None:
   )
   st.stop()
 
+
+def clean_str(s):
+  if s is None or pd.isna(s):
+    return "X"
+  if isinstance(s, (tuple, list)):
+    s = "_".join(str(x) for x in s if pd.notna(x))
+  res = "".join(c if c.isalnum() else "_" for c in str(s)).strip("_")
+  return res if res else "X"
+
+
 # Load sheets
 try:
   xls = pd.ExcelFile(excel_path)
@@ -58,7 +58,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM":,
+          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
       })
   )
   df_mgmp_init = (
@@ -218,7 +218,7 @@ if st.button(
     ]
     x = {
         (g, k, h, j): pulp.LpVariable(
-            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{clean_str(j)}",
+            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
             lowBound=0,
             upBound=1,
             cat=pulp.LpInteger,
@@ -252,7 +252,7 @@ if st.button(
     ]
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{clean_str(j)}",
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -286,7 +286,7 @@ if st.button(
 
     z_gap = {
         (g, k, h, j): pulp.LpVariable(
-            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{clean_str(j)}",
+            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -431,7 +431,7 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4 and (g, k, h, j) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
                     lowBound=0,
                     cat=pulp.LpContinuous,
                 )
