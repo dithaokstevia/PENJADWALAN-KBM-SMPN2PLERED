@@ -53,7 +53,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM":,
+          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
       })
   )
   df_mgmp_init = (
@@ -151,7 +151,6 @@ if st.button(
         ~df_status_raw["Guru"].str.upper().isin(INVALID_TEXTS)
     ].drop_duplicates(subset=["Guru"]).copy()
 
-    # Memastikan df_pair dan valid_gk_pairs 100% identik
     df_pair = df_beban.groupby(["Guru", "Kelas"], as_index=False)[
         "Jam_Wajib"
     ].sum()
@@ -264,8 +263,6 @@ if st.button(
           cat=pulp.LpContinuous,
       )
 
-    # KENDALA-KENDALA (CONSTRAINTS)
-
     # Kendala Guru MGMP
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
@@ -314,7 +311,7 @@ if st.button(
           == jw
       )
 
-    # C4: Block Teaching Kontinu (Tanpa Jeda Jam)
+    # C4: Block Teaching Kontinu
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
@@ -325,7 +322,7 @@ if st.button(
               <= 1
           )
 
-    # C6: Wali Kelas (Mengajar Jam Ke-1 di Hari Jumat)
+    # C6: Wali Kelas
     for g in GURU:
       st_info = status_dict.get(g, {})
       is_wali_val = st_info.get("Is_Wali")
@@ -347,7 +344,7 @@ if st.button(
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # C7: Wakasek (Maksimal 1 Wakasek mengajar jam ke-1 per hari)
+    # C7: Wakasek
     wakasek_teachers = [
         g
         for g in GURU
@@ -364,7 +361,7 @@ if st.button(
             pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) <= 1
         )
 
-    # C8: Guru PJOK (Khusus Jam 1 s.d. 4)
+    # C8: Guru PJOK
     for g in GURU:
       is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
       if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
@@ -389,7 +386,7 @@ if st.button(
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
-    # FUNGSI TUJUAN (OBJECTIVE FUNCTION)
+    # FUNGSI TUJUAN
     model += (
         100000.0
         * pulp.lpSum(
@@ -404,7 +401,6 @@ if st.button(
         ])
     )
 
-    # Memanggil Solver CBC
     solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
     model.solve(solver)
 
@@ -419,7 +415,6 @@ if st.button(
 
       st.success("🎉 OPTIMASI SELESAI & BERHASIL!")
 
-      # Ringkasan Matriks
       col1, col2, col3 = st.columns(3)
       col1.metric("Total Guru Terjadwal", len(GURU))
       col2.metric("Total Kelas (Rombel)", len(KELAS))
@@ -449,7 +444,6 @@ if st.button(
         st.subheader("Tabel Detail Penugasan")
         st.dataframe(df_hasil, use_container_width=True)
 
-      # Ekspor Hasil ke Excel
       output = io.BytesIO()
       with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_hasil.to_excel(writer, sheet_name="Data_Penugasan", index=False)
