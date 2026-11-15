@@ -1,55 +1,67 @@
 import io
 import os
+import numpy as np
 import pandas as pd
 import pulp
 import streamlit as st
 
 
-def sanitize_dataframe(df):
-  if df is None or df.empty:
-    return pd.DataFrame()
-  df = df.copy()
-  if isinstance(df.columns, pd.MultiIndex):
-    df.columns = [
-        "_".join(str(c) for c in col if pd.notna(c) and str(c).strip() != "")
-        .strip()
-        for col in df.columns
-    ]
-  df = df.loc[:, ~df.columns.duplicated()].copy()
-  df.columns = [str(c).strip() for c in df.columns]
-  return df
-
-
 def to_scalar(val, default=None):
-  if val is None or pd.isna(val):
+  if val is None:
     return default
-  if isinstance(val, (pd.Series, list, tuple)):
+  if isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
     for item in val:
-      if pd.notna(item) and str(item).strip() != "":
-        return item
+      res = to_scalar(item, None)
+      if res is not None:
+        return res
+    return default
+  try:
+    if pd.isna(val):
+      return default
+  except Exception:
+    pass
+  s = str(val).strip()
+  if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT"]:
     return default
   return val
 
 
+def to_str(val, default=""):
+  sc = to_scalar(val, None)
+  if sc is None:
+    return default
+  return str(sc).strip()
+
+
 def to_int(val, default=0):
-  sc = to_scalar(val, default)
+  sc = to_scalar(val, None)
+  if sc is None:
+    return default
   try:
     return int(float(sc))
   except Exception:
     return default
 
 
-def to_str(val, default=""):
-  sc = to_scalar(val, default)
-  if sc is None:
-    return default
-  return str(sc).strip()
-
-
 def clean_str(s):
   sc = to_str(s, "X")
   res = "".join(c if c.isalnum() else "_" for c in sc).strip("_")
   return res if res else "X"
+
+
+def sanitize_dataframe(df):
+  if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+    return pd.DataFrame()
+  df = df.copy()
+  if isinstance(df.columns, pd.MultiIndex):
+    flat_cols = []
+    for col in df.columns:
+      parts = [str(c).strip() for c in col if pd.notna(c) and str(c).strip()]
+      flat_cols.append("_".join(parts) if parts else "Unassigned")
+    df.columns = flat_cols
+  df.columns = [str(c).strip() for c in df.columns]
+  df = df.loc[:, ~df.columns.duplicated()].copy()
+  return df
 
 
 def find_col(df, candidate_names, default_name=""):
@@ -301,33 +313,27 @@ if st.button(
         for j in JAM_HARI.get(h_s, []):
           var_keys.append((g_s, k_s, h_s, to_int(j)))
 
-    x = {
-        (g, k, h, j): pulp.LpVariable(
-            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
-            lowBound=0,
-            upBound=1,
-            cat=pulp.LpInteger,
-        )
-        for (g, k, h, j) in var_keys
-    }
+    x = {}
+    for g, k, h, j in var_keys:
+      var_name = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{to_int(j)}"
+      x[(g, k, h, j)] = pulp.LpVariable(
+          name=var_name, lowBound=0, upBound=1, cat=pulp.LpInteger
+      )
 
     pair_keys = [(to_str(g), to_str(k)) for (g, k) in valid_gk_pairs]
-    d_pair_minus = {
-        (g, k): pulp.LpVariable(
-            f"dp_minus_{clean_str(g)}_{clean_str(k)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
-        )
-        for (g, k) in pair_keys
-    }
-    d_pair_plus = {
-        (g, k): pulp.LpVariable(
-            f"dp_plus_{clean_str(g)}_{clean_str(k)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
-        )
-        for (g, k) in pair_keys
-    }
+    d_pair_minus = {}
+    d_pair_plus = {}
+    for g, k in pair_keys:
+      d_pair_minus[(g, k)] = pulp.LpVariable(
+          name=f"dp_minus_{clean_str(g)}_{clean_str(k)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
+      d_pair_plus[(g, k)] = pulp.LpVariable(
+          name=f"dp_plus_{clean_str(g)}_{clean_str(k)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
     c2_keys = [
         (to_str(k), to_str(h), to_int(j))
@@ -335,32 +341,28 @@ if st.button(
         for h in HARI
         for j in JAM_HARI.get(to_str(h), [])
     ]
-    d_c2_minus = {
-        (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
-        )
-        for (k, h, j) in c2_keys
-    }
+    d_c2_minus = {}
+    for k, h, j in c2_keys:
+      d_c2_minus[(k, h, j)] = pulp.LpVariable(
+          name=f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{to_int(j)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
     dh_keys = [(to_str(g), to_str(h)) for g in GURU for h in HARI]
-    d_h_plus = {
-        (g, h): pulp.LpVariable(
-            f"dh_plus_{clean_str(g)}_{clean_str(h)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
-        )
-        for (g, h) in dh_keys
-    }
-    d_h_minus = {
-        (g, h): pulp.LpVariable(
-            f"dh_minus_{clean_str(g)}_{clean_str(h)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
-        )
-        for (g, h) in dh_keys
-    }
+    d_h_plus = {}
+    d_h_minus = {}
+    for g, h in dh_keys:
+      d_h_plus[(g, h)] = pulp.LpVariable(
+          name=f"dh_plus_{clean_str(g)}_{clean_str(h)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
+      d_h_minus[(g, h)] = pulp.LpVariable(
+          name=f"dh_minus_{clean_str(g)}_{clean_str(h)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
     gap_keys = []
     for g, k in valid_gk_pairs:
@@ -371,14 +373,13 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_int(j_list[idx])))
 
-    z_gap = {
-        (g, k, h, j): pulp.LpVariable(
-            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
-        )
-        for (g, k, h, j) in gap_keys
-    }
+    z_gap = {}
+    for g, k, h, j in gap_keys:
+      z_gap[(g, k, h, j)] = pulp.LpVariable(
+          name=f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{to_int(j)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
     # Constraints
     for g in mgmp_teachers:
@@ -485,7 +486,7 @@ if st.button(
             and (g, k_wali, "Jumat", 1) in x
         ):
           p_c6 = pulp.LpVariable(
-              f"penalti_wali_{clean_str(g)}",
+              name=f"penalti_wali_{clean_str(g)}",
               lowBound=0,
               cat=pulp.LpContinuous,
           )
@@ -520,7 +521,7 @@ if st.button(
               j_i = to_int(j)
               if j_i > 4 and (g, k_i, h, j_i) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j_i}",
+                    name=f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j_i}",
                     lowBound=0,
                     cat=pulp.LpContinuous,
                 )
@@ -606,4 +607,4 @@ if st.button(
       st.error(
           "❌ Solver tidak menemukan solusi yang valid. Periksa kembali batasan"
           " atau jam wajib."
-      )
+                )
