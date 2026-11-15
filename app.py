@@ -16,6 +16,16 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
+
+def clean_str(s):
+  if s is None or pd.isna(s):
+    return "X"
+  if isinstance(s, (tuple, list)):
+    s = "_".join(str(x) for x in s if pd.notna(x))
+  res = "".join(c if c.isalnum() else "_" for c in str(s)).strip("_")
+  return res if res else "X"
+
+
 # Sidebar for file upload
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
@@ -149,7 +159,11 @@ if st.button(
         "Jam_Wajib"
     ].sum()
 
-    HARI = list(df_config["Hari"].astype(str).str.strip())
+    HARI = [
+        str(h).strip()
+        for h in df_config["Hari"]
+        if pd.notna(h) and str(h).strip() != ""
+    ]
     JAM_HARI = {}
     for _, r in df_config.iterrows():
       h_name = str(r["Hari"]).strip()
@@ -198,18 +212,51 @@ if st.button(
         for h in HARI
         for j in JAM_HARI[h]
     ]
-    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
+    x = {
+        (g, k, h, j): pulp.LpVariable(
+            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
+            cat=pulp.LpBinary,
+        )
+        for (g, k, h, j) in var_keys
+    }
 
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = pulp.LpVariable.dicts("dpair_minus", pair_keys, lowBound=0)
-    d_pair_plus = pulp.LpVariable.dicts("dpair_plus", pair_keys, lowBound=0)
+    d_pair_minus = {
+        (g, k): pulp.LpVariable(
+            f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
+    d_pair_plus = {
+        (g, k): pulp.LpVariable(
+            f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
 
-    c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
+    c2_keys = [
+        (k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]
+    ]
+    d_c2_minus = {
+        (k, h, j): pulp.LpVariable(
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+        )
+        for (k, h, j) in c2_keys
+    }
 
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
-    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
+    d_h_plus = {
+        (g, h): pulp.LpVariable(
+            f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
+    d_h_minus = {
+        (g, h): pulp.LpVariable(
+            f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
 
     gap_keys = []
     for g, k in valid_gk_pairs:
@@ -217,7 +264,12 @@ if st.button(
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
+    z_gap = {
+        (g, k, h, j): pulp.LpVariable(
+            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+        )
+        for (g, k, h, j) in gap_keys
+    }
 
     # Constraints
     for g in mgmp_teachers:
@@ -232,7 +284,7 @@ if st.button(
           assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
           for k in assigned_k:
             for j in JAM_HARI[h_mgmp]:
-              if j > 2:
+              if j > 2 and (g, k, h_mgmp, j) in x:
                 model += x[g, k, h_mgmp, j] == 0
 
     penalti_list = []
@@ -242,37 +294,60 @@ if st.button(
       if assigned_k:
         for h in HARI:
           for j in JAM_HARI[h]:
-            model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
+            model += (
+                pulp.lpSum([
+                    x[g, k, h, j] for k in assigned_k if (g, k, h, j) in x
+                ])
+                <= 1
+            )
 
     for k in KELAS:
       assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
         for h in HARI:
           for j in JAM_HARI[h]:
-            model += (
-                pulp.lpSum([x[g, k, h, j] for g in assigned_g])
-                + d_c2_minus[k, h, j]
-                == 1
-            )
+            if (k, h, j) in d_c2_minus:
+              model += (
+                  pulp.lpSum([
+                      x[g, k, h, j] for g in assigned_g if (g, k, h, j) in x
+                  ])
+                  + d_c2_minus[k, h, j]
+                  == 1
+              )
 
     for _, row in df_pair.iterrows():
       g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
-      model += (
-          pulp.lpSum([x[g, k, h, j] for h in HARI for j in JAM_HARI[h]])
-          + d_pair_minus[g, k]
-          - d_pair_plus[g, k]
-          == jw
-      )
+      if (g, k) in d_pair_minus and (g, k) in d_pair_plus:
+        model += (
+            pulp.lpSum([
+                x[g, k, h, j]
+                for h in HARI
+                for j in JAM_HARI[h]
+                if (g, k, h, j) in x
+            ])
+            + d_pair_minus[g, k]
+            - d_pair_plus[g, k]
+            == jw
+        )
 
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
-          model += (
-              x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1]
-              <= 1
-          )
+          if (
+              (g, k, h, j1) in x
+              and (g, k, h, j2) in x
+              and (g, k, h, j3) in x
+              and (g, k, h, j1) in z_gap
+          ):
+            model += (
+                x[g, k, h, j1]
+                + x[g, k, h, j3]
+                - x[g, k, h, j2]
+                - z_gap[g, k, h, j1]
+                <= 1
+            )
 
     for g in GURU:
       st_info = status_dict.get(g, {})
@@ -286,8 +361,12 @@ if st.button(
       ]:
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
-          if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(f"penalti_wali_{g}", lowBound=0)
+          if (
+              (g, k_wali) in valid_gk_pairs
+              and "Jumat" in HARI
+              and (g, k_wali, "Jumat", 1) in x
+          ):
+            p_c6 = pulp.LpVariable(f"penalti_wali_{clean_str(g)}", lowBound=0)
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -303,8 +382,9 @@ if st.button(
         model += (
             pulp.lpSum([
                 x[g_w, k, h, 1]
-                for (g_w, k) in valid_gk_pairs
-                if g_w in wakasek_teachers
+                for g_w in wakasek_teachers
+                for k in KELAS
+                if (g_w, k, h, 1) in x
             ])
             <= 1
         )
@@ -322,9 +402,10 @@ if st.button(
         for h in HARI:
           for k in assigned_k:
             for j in JAM_HARI[h]:
-              if j > 4:
+              if j > 4 and (g, k, h, j) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{g}_{h}_{k}_{j}", lowBound=0
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
+                    lowBound=0,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
