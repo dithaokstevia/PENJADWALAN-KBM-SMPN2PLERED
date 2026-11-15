@@ -18,18 +18,44 @@ st.markdown(
 
 
 def clean_str(s):
-  return "".join(c if c.isalnum() else "_" for c in str(s))
+  if isinstance(s, (tuple, list)):
+    s = "_".join(str(x) for x in s)
+  return "".join(c if c.isalnum() else "_" for c in str(s)).strip("_")
 
 
-def find_col(df, names):
-  for name in names:
-    for col in df.columns:
-      if str(col).strip().lower() == name.lower():
-        return col
-  return names[0]
+def flatten_columns(df):
+  if isinstance(df.columns, pd.MultiIndex):
+    df.columns = [
+        "_".join(str(e) for e in col if pd.notna(e) and str(e).strip() != "")
+        .strip()
+        for col in df.columns
+    ]
+  else:
+    df.columns = [
+        str(col).strip()
+        if not isinstance(col, tuple)
+        else "_".join(str(e) for e in col)
+        for col in df.columns
+    ]
+  return df
 
 
-# Sidebar untuk unggah file Excel
+def find_col(df, candidate_names, default_name=""):
+  cols = [str(c).strip() for c in df.columns]
+  for name in candidate_names:
+    for idx, c in enumerate(cols):
+      if c.lower() == name.lower():
+        return df.columns[idx]
+  for name in candidate_names:
+    for idx, c in enumerate(cols):
+      if name.lower() in c.lower() or c.lower() in name.lower():
+        return df.columns[idx]
+  if len(df.columns) > 0:
+    return df.columns[0]
+  return str(default_name)
+
+
+# Sidebar for file upload
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
     "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
@@ -53,7 +79,7 @@ if excel_path is None:
   )
   st.stop()
 
-# Membaca lembar kerja Excel
+# Load sheets
 try:
   xls = pd.ExcelFile(excel_path)
   df_config_init = (
@@ -126,69 +152,103 @@ with tab_beban:
 
 st.divider()
 
-# Tombol Eksekusi Solver
+# Solver Execution Button
 if st.button(
     "🚀 Jalankan Optimasi Jadwal (BIP 0-1)",
     type="primary",
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
-    # Pemetaan & pembersihan nama kolom secara fleksibel
-    col_guru = find_col(df_beban_raw, ["Guru", "Nama_Guru", "Nama Guru"])
-    col_kelas = find_col(df_beban_raw, ["Kelas", "Nama_Kelas", "Rombel"])
+    # Flatten column structures if multi-level
+    df_beban_raw = flatten_columns(df_beban_raw)
+    df_config = flatten_columns(df_config)
+    df_status_raw = flatten_columns(df_status_raw)
+    df_mgmp_rule = flatten_columns(df_mgmp_rule)
+
+    # Flexible Column Mapping
+    col_guru = find_col(df_beban_raw, ["Guru", "Nama_Guru", "Nama Guru"], "Guru")
+    col_kelas = find_col(
+        df_beban_raw, ["Kelas", "Nama_Kelas", "Rombel"], "Kelas"
+    )
     col_jw = find_col(
-        df_beban_raw, ["Jam_Wajib", "Jam Wajib", "Target_Jam", "Jam"]
+        df_beban_raw, ["Jam_Wajib", "Jam Wajib", "Target_Jam", "Jam"], "Jam_Wajib"
     )
 
-    df_beban_raw[col_guru] = (
-        df_beban_raw[col_guru].replace(r"^\s*$", None, regex=True).ffill()
+    # Clean series safely
+    s_guru = (
+        df_beban_raw[col_guru].iloc[:, 0]
+        if isinstance(df_beban_raw[col_guru], pd.DataFrame)
+        else df_beban_raw[col_guru]
     )
-    df_beban_raw[col_guru] = df_beban_raw[col_guru].astype(str).str.strip()
-    df_beban_raw[col_kelas] = (
-        df_beban_raw[col_kelas].astype(str).str.strip().str.upper()
+    s_kelas = (
+        df_beban_raw[col_kelas].iloc[:, 0]
+        if isinstance(df_beban_raw[col_kelas], pd.DataFrame)
+        else df_beban_raw[col_kelas]
     )
-    df_beban_raw[col_jw] = (
-        pd.to_numeric(df_beban_raw[col_jw], errors="coerce")
-        .fillna(0)
-        .astype(int)
+    s_jw = (
+        df_beban_raw[col_jw].iloc[:, 0]
+        if isinstance(df_beban_raw[col_jw], pd.DataFrame)
+        else df_beban_raw[col_jw]
     )
+
+    df_beban_clean = pd.DataFrame({
+        "Guru": (
+            s_guru.replace(r"^\s*$", None, regex=True)
+            .ffill()
+            .astype(str)
+            .str.strip()
+        ),
+        "Kelas": s_kelas.astype(str).str.strip().str.upper(),
+        "Jam_Wajib": (
+            pd.to_numeric(s_jw, errors="coerce").fillna(0).astype(int)
+        ),
+    })
 
     INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
-    df_beban = df_beban_raw[
-        (~df_beban_raw[col_guru].str.upper().isin(INVALID_TEXTS))
-        & (~df_beban_raw[col_kelas].isin(INVALID_TEXTS))
-        & (df_beban_raw[col_jw] > 0)
+    df_beban = df_beban_clean[
+        (~df_beban_clean["Guru"].str.upper().isin(INVALID_TEXTS))
+        & (~df_beban_clean["Kelas"].isin(INVALID_TEXTS))
+        & (df_beban_clean["Jam_Wajib"] > 0)
     ].copy()
 
     col_status_guru = find_col(
-        df_status_raw, ["Guru", "Nama_Guru", "Nama Guru"]
+        df_status_raw, ["Guru", "Nama_Guru", "Nama Guru"], "Guru"
     )
-    df_status_raw[col_status_guru] = (
-        df_status_raw[col_status_guru].astype(str).str.strip()
+    s_status_guru = (
+        df_status_raw[col_status_guru].iloc[:, 0]
+        if isinstance(df_status_raw[col_status_guru], pd.DataFrame)
+        else df_status_raw[col_status_guru]
     )
-    df_status = df_status_raw[
-        ~df_status_raw[col_status_guru].str.upper().isin(INVALID_TEXTS)
-    ].drop_duplicates(subset=[col_status_guru]).copy()
 
-    df_pair = df_beban.groupby([col_guru, col_kelas], as_index=False)[
-        col_jw
+    df_status_clean = df_status_raw.copy()
+    df_status_clean["Guru_Key"] = s_status_guru.astype(str).str.strip()
+    df_status = df_status_clean[
+        ~df_status_clean["Guru_Key"].str.upper().isin(INVALID_TEXTS)
+    ].drop_duplicates(subset=["Guru_Key"]).copy()
+
+    df_pair = df_beban.groupby(["Guru", "Kelas"], as_index=False)[
+        "Jam_Wajib"
     ].sum()
-    df_pair.rename(
-        columns={
-            col_guru: "Guru",
-            col_kelas: "Kelas",
-            col_jw: "Jam_Wajib",
-        },
-        inplace=True,
-    )
     df_pair = df_pair[df_pair["Jam_Wajib"] > 0].copy()
 
-    col_hari = find_col(df_config, ["Hari", "Nama_Hari", "Day"])
+    col_hari = find_col(df_config, ["Hari", "Nama_Hari", "Day"], "Hari")
     col_jam_count = find_col(
-        df_config, ["Jumlah_Jam_KBM", "Jumlah_Jam", "Jam_KBM", "Jam"]
+        df_config,
+        ["Jumlah_Jam_KBM", "Jumlah_Jam", "Jam_KBM", "Jam"],
+        "Jumlah_Jam_KBM",
     )
 
-    HARI = list(df_config[col_hari].astype(str).str.strip())
+    s_hari = (
+        df_config[col_hari].iloc[:, 0]
+        if isinstance(df_config[col_hari], pd.DataFrame)
+        else df_config[col_hari]
+    )
+    HARI = [
+        str(h).strip()
+        for h in s_hari
+        if pd.notna(h) and str(h).strip() != ""
+    ]
+
     JAM_HARI = {}
     for _, r in df_config.iterrows():
       h_name = str(r[col_hari]).strip()
@@ -196,29 +256,42 @@ if st.button(
       JAM_HARI[h_name] = list(range(1, j_count + 1))
 
     col_mgmp_mapel = find_col(
-        df_mgmp_rule, ["Mata_Pelajaran", "Mapel", "Mata Pelajaran"]
+        df_mgmp_rule,
+        ["Mata_Pelajaran", "Mapel", "Mata Pelajaran"],
+        "Mata_Pelajaran",
     )
     col_mgmp_hari = find_col(
-        df_mgmp_rule, ["Hari_MGMP", "Hari MGMP", "Hari"]
+        df_mgmp_rule, ["Hari_MGMP", "Hari MGMP", "Hari"], "Hari_MGMP"
+    )
+
+    s_mgmp_mapel = (
+        df_mgmp_rule[col_mgmp_mapel].iloc[:, 0]
+        if isinstance(df_mgmp_rule[col_mgmp_mapel], pd.DataFrame)
+        else df_mgmp_rule[col_mgmp_mapel]
+    )
+    s_mgmp_hari = (
+        df_mgmp_rule[col_mgmp_hari].iloc[:, 0]
+        if isinstance(df_mgmp_rule[col_mgmp_hari], pd.DataFrame)
+        else df_mgmp_rule[col_mgmp_hari]
     )
 
     HARI_MGMP_MAPEL = dict(
         zip(
-            df_mgmp_rule[col_mgmp_mapel].astype(str).str.strip().str.upper(),
-            df_mgmp_rule[col_mgmp_hari].astype(str).str.strip(),
+            s_mgmp_mapel.astype(str).str.strip().str.upper(),
+            s_mgmp_hari.astype(str).str.strip(),
         )
     )
 
-    GURU = sorted(list(df_pair["Guru"].unique()))
-    KELAS = sorted(list(df_pair["Kelas"].unique()))
+    GURU = sorted(list(set(str(g) for g in df_pair["Guru"])))
+    KELAS = sorted(list(set(str(k) for k in df_pair["Kelas"])))
 
     status_dict = (
-        df_status.set_index(col_status_guru).to_dict("index")
+        df_status.set_index("Guru_Key").to_dict("index")
         if not df_status.empty
         else {}
     )
     valid_gk_pairs = set(
-        (row["Guru"], row["Kelas"])
+        (str(row["Guru"]), str(row["Kelas"]))
         for _, row in df_pair.iterrows()
         if row["Jam_Wajib"] > 0
     )
@@ -236,80 +309,85 @@ if st.button(
       ]:
         mgmp_teachers.add(g)
 
-    # Inisialisasi Model PuLP
+    # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    # 1. Variabel Biner Penugasan x(g, k, h, j)
+    # 1. Decision Variables x(g, k, h, j)
     var_keys = [
-        (g, k, h, j)
+        (str(g), str(k), str(h), int(j))
         for (g, k) in valid_gk_pairs
         for h in HARI
         for j in JAM_HARI[h]
     ]
     x = {
         (g, k, h, j): pulp.LpVariable(
-            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
-            0,
-            1,
-            pulp.LpBinary,
+            str(f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}"),
+            cat=pulp.LpBinary,
         )
         for (g, k, h, j) in var_keys
     }
 
-    # 2. Variabel Deviasi Jam Wajib (d_pair_minus & d_pair_plus)
-    pair_keys = list(valid_gk_pairs)
+    # 2. Workload deviation variables
+    pair_keys = [(str(g), str(k)) for (g, k) in valid_gk_pairs]
     d_pair_minus = {
         (g, k): pulp.LpVariable(
-            f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+            str(f"dp_minus_{clean_str(g)}_{clean_str(k)}"), lowBound=0
         )
         for (g, k) in pair_keys
     }
     d_pair_plus = {
         (g, k): pulp.LpVariable(
-            f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+            str(f"dp_plus_{clean_str(g)}_{clean_str(k)}"), lowBound=0
         )
         for (g, k) in pair_keys
     }
 
-    # 3. Variabel Deviasi Kelas Kosong (d_c2_minus)
-    c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
+    # 3. Class empty deviation variables
+    c2_keys = [
+        (str(k), str(h), int(j))
+        for k in KELAS
+        for h in HARI
+        for j in JAM_HARI[h]
+    ]
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}", lowBound=0
+            str(f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}"), lowBound=0
         )
         for (k, h, j) in c2_keys
     }
 
-    # 4. Variabel Jam Kerja Guru (d_h_plus & d_h_minus)
-    dh_keys = [(g, h) for g in GURU for h in HARI]
+    # 4. Teacher daily workload variables
+    dh_keys = [(str(g), str(h)) for g in GURU for h in HARI]
     d_h_plus = {
         (g, h): pulp.LpVariable(
-            f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+            str(f"dh_plus_{clean_str(g)}_{clean_str(h)}"), lowBound=0
         )
         for (g, h) in dh_keys
     }
     d_h_minus = {
         (g, h): pulp.LpVariable(
-            f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+            str(f"dh_minus_{clean_str(g)}_{clean_str(h)}"), lowBound=0
         )
         for (g, h) in dh_keys
     }
 
-    # 5. Variabel Gap / Jeda Jam (z_gap)
-    z_gap = {}
+    # 5. Gap / Break variables
+    gap_keys = []
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
-          j1 = j_list[idx]
-          z_gap[g, k, h, j1] = pulp.LpVariable(
-              f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j1)}",
-              lowBound=0,
-          )
+          gap_keys.append((str(g), str(k), str(h), int(j_list[idx])))
 
-    # KENDALA-KENDALA (CONSTRAINTS)
+    z_gap = {
+        (g, k, h, j): pulp.LpVariable(
+            str(f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}"),
+            lowBound=0,
+        )
+        for (g, k, h, j) in gap_keys
+    }
 
-    # Kendala Guru MGMP
+    # Constraints
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
       mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -327,7 +405,7 @@ if st.button(
 
     penalti_list = []
 
-    # C1: Maksimal 1 Kelas per Guru per Jam
+    # C1: Max 1 Class per Teacher per Period
     for g in GURU:
       assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
       if assigned_k:
@@ -335,7 +413,7 @@ if st.button(
           for j in JAM_HARI[h]:
             model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
 
-    # C2: Tepat 1 Guru per Kelas per Jam
+    # C2: Exactly 1 Teacher per Class per Period
     for k in KELAS:
       assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
@@ -347,9 +425,9 @@ if st.button(
                 == 1
             )
 
-    # C3: Pemenuhan Target Jam Wajib Pasangan Guru & Kelas
+    # C3: Target Teaching Hours per Pair
     for _, row in df_pair.iterrows():
-      g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
+      g, k, jw = str(row["Guru"]), str(row["Kelas"]), int(row["Jam_Wajib"])
       model += (
           pulp.lpSum([x[g, k, h, j] for h in HARI for j in JAM_HARI[h]])
           + d_pair_minus[g, k]
@@ -357,7 +435,7 @@ if st.button(
           == jw
       )
 
-    # C4: Block Teaching Kontinu
+    # C4: Continuous Block Teaching
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
@@ -368,7 +446,7 @@ if st.button(
               <= 1
           )
 
-    # C6: Wali Kelas
+    # C6: Homeroom Teacher (Wali Kelas) Friday Period 1
     for g in GURU:
       st_info = status_dict.get(g, {})
       is_wali_val = st_info.get("Is_Wali")
@@ -382,11 +460,13 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(f"penalti_wali_{clean_str(g)}", lowBound=0)
+            p_c6 = pulp.LpVariable(
+                str(f"penalti_wali_{clean_str(g)}"), lowBound=0
+            )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # C7: Wakasek
+    # C7: Vice Principal (Wakasek) Max 1 at Period 1
     wakasek_teachers = [
         g
         for g in GURU
@@ -403,7 +483,7 @@ if st.button(
             pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) <= 1
         )
 
-    # C8: Guru PJOK
+    # C8: PE Teachers (PJOK) Periods 1-4 Only
     for g in GURU:
       is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
       if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
@@ -419,19 +499,21 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
+                    str(
+                        f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}"
+                    ),
                     lowBound=0,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
-    # FUNGSI TUJUAN
+    # Objective Function
     model += (
         100000.0
         * pulp.lpSum(
-            [d_pair_minus[g, k] + d_pair_plus[g, k] for g, k in pair_keys]
+            [d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys]
         )
-        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for k, h, j in c2_keys])
+        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for (k, h, j) in c2_keys])
         + 50000.0 * pulp.lpSum([z_gap[key] for key in z_gap])
         + 1000.0 * pulp.lpSum(penalti_list)
         + 2.0
