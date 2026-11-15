@@ -486,9 +486,7 @@ if st.button(
               and "Jumat" in HARI
               and (g, k_wali, "Jumat", 1) in x
           ):
-            p_c6 = p_c6 = pulp.LpVariable(
-                f"penalti_wali_{clean_str(g)}", lowBound=0
-            )
+            p_c6 = pulp.LpVariable(f"penalti_wali_{clean_str(g)}", lowBound=0)
             penalti_list.append(p_c6)
             model += x[(g, k_wali, "Jumat", 1)] + p_c6 >= 1
 
