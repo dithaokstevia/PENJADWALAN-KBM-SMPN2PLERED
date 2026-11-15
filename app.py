@@ -58,7 +58,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+          "Jumlah_Jam_KBM":,
       })
   )
   df_mgmp_init = (
@@ -218,10 +218,10 @@ if st.button(
     ]
     x = {
         (g, k, h, j): pulp.LpVariable(
-            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
+            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{clean_str(j)}",
             lowBound=0,
             upBound=1,
-            cat=pulp.LpBinary,
+            cat=pulp.LpInteger,
         )
         for (g, k, h, j) in var_keys
     }
@@ -252,7 +252,7 @@ if st.button(
     ]
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}",
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{clean_str(j)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -286,7 +286,7 @@ if st.button(
 
     z_gap = {
         (g, k, h, j): pulp.LpVariable(
-            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
+            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{clean_str(j)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -316,12 +316,13 @@ if st.button(
       if assigned_k:
         for h in HARI:
           for j in JAM_HARI[h]:
-            model += (
-                pulp.lpSum([
-                    x[g, k, h, j] for k in assigned_k if (g, k, h, j) in x
-                ])
-                <= 1
-            )
+            if any((g, k, h, j) in x for k in assigned_k):
+              model += (
+                  pulp.lpSum([
+                      x[g, k, h, j] for k in assigned_k if (g, k, h, j) in x
+                  ])
+                  <= 1
+              )
 
     for k in KELAS:
       assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
@@ -388,7 +389,11 @@ if st.button(
               and "Jumat" in HARI
               and (g, k_wali, "Jumat", 1) in x
           ):
-            p_c6 = pulp.LpVariable(f"penalti_wali_{clean_str(g)}", lowBound=0)
+            p_c6 = pulp.LpVariable(
+                f"penalti_wali_{clean_str(g)}",
+                lowBound=0,
+                cat=pulp.LpContinuous,
+            )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -426,8 +431,9 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4 and (g, k, h, j) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
                     lowBound=0,
+                    cat=pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
