@@ -197,13 +197,13 @@ if st.button(
     # Membangun Model Optimasi PuLP
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    # 1. Variabel Keputusan biner (x_g_k_h_j)
+    # 1. Variabel Keputusan biner (x_g_k_h_j) - Menggunakan 4 Argumen Posisional (name, lowBound, upBound, cat)
     x = {}
     for g, k in valid_gk_pairs:
       for h in HARI:
         for j in JAM_HARI[h]:
           v_name = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
-          x[g, k, h, j] = pulp.LpVariable(v_name, cat=pulp.LpBinary)
+          x[g, k, h, j] = pulp.LpVariable(v_name, 0, 1, pulp.LpBinary)
 
     # 2. Variabel Deviasi Jam Wajib (d_pair)
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
@@ -211,10 +211,10 @@ if st.button(
     d_pair_plus = {}
     for g, k in pair_keys:
       d_pair_minus[g, k] = pulp.LpVariable(
-          f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+          f"dp_minus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
       )
       d_pair_plus[g, k] = pulp.LpVariable(
-          f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+          f"dp_plus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
       )
 
     # 3. Variabel Deviasi Kelas Kosong (d_c2)
@@ -222,7 +222,10 @@ if st.button(
     d_c2_minus = {}
     for k, h, j in c2_keys:
       d_c2_minus[k, h, j] = pulp.LpVariable(
-          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}",
+          0,
+          None,
+          pulp.LpContinuous,
       )
 
     # 4. Variabel Jam Kerja Guru (d_h)
@@ -231,10 +234,10 @@ if st.button(
     d_h_minus = {}
     for g, h in dh_keys:
       d_h_plus[g, h] = pulp.LpVariable(
-          f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+          f"dh_plus_{clean_str(g)}_{clean_str(h)}", 0, None, pulp.LpContinuous
       )
       d_h_minus[g, h] = pulp.LpVariable(
-          f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+          f"dh_minus_{clean_str(g)}_{clean_str(h)}", 0, None, pulp.LpContinuous
       )
 
     # 5. Variabel Gap (Jeda Jam)
@@ -248,7 +251,10 @@ if st.button(
     z_gap = {}
     for g, k, h, j in gap_keys:
       z_gap[g, k, h, j] = pulp.LpVariable(
-          f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+          f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
+          0,
+          None,
+          pulp.LpContinuous,
       )
 
     # KENDALA (CONSTRAINTS)
@@ -327,7 +333,7 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(
-                f"penalti_wali_{clean_str(g)}", lowBound=0
+                f"penalti_wali_{clean_str(g)}", 0, None, pulp.LpContinuous
             )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
@@ -369,7 +375,9 @@ if st.button(
               if j > 4:
                 p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
-                    lowBound=0,
+                    0,
+                    None,
+                    pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
