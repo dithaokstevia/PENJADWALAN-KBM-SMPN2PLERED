@@ -324,7 +324,7 @@ if st.button(
             f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
             0,
             1,
-            pulp.LpBinary,
+            pulp.LpInteger,
         )
         for (g, k, h, j) in var_keys
     }
@@ -333,7 +333,10 @@ if st.button(
     pair_keys = [(str(g), str(k)) for (g, k) in valid_gk_pairs]
     d_pair_minus = {
         (g, k): pulp.LpVariable(
-            f"dp_minus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
+            f"dp_minus_{clean_str(g)}_{clean_str(k)}",
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (g, k) in pair_keys
     }
