@@ -16,6 +16,11 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
+
+def clean_str(s):
+  return "".join(c if c.isalnum() else "_" for c in str(s))
+
+
 # Sidebar for file upload
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
@@ -192,32 +197,70 @@ if st.button(
     # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    var_keys = [
-        (g, k, h, j)
-        for (g, k) in valid_gk_pairs
-        for h in HARI
-        for j in JAM_HARI[h]
-    ]
-    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
+    # 1. Variabel Keputusan biner x(g, k, h, j)
+    x = {}
+    for g, k in valid_gk_pairs:
+      for h in HARI:
+        for j in JAM_HARI[h]:
+          var_name = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
+          x[g, k, h, j] = pulp.LpVariable(var_name, cat=pulp.LpBinary)
 
+    # 2. Variabel Deviasi Jam Wajib (d_pair)
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = pulp.LpVariable.dicts("dpair_minus", pair_keys, lowBound=0)
-    d_pair_plus = pulp.LpVariable.dicts("dpair_plus", pair_keys, lowBound=0)
+    d_pair_minus = {}
+    d_pair_plus = {}
+    for g, k in pair_keys:
+      d_pair_minus[g, k] = pulp.LpVariable(
+          f"dp_minus_{clean_str(g)}_{clean_str(k)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
+      d_pair_plus[g, k] = pulp.LpVariable(
+          f"dp_plus_{clean_str(g)}_{clean_str(k)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
+    # 3. Variabel Deviasi Kelas Kosong (d_c2)
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
+    d_c2_minus = {}
+    for k, h, j in c2_keys:
+      d_c2_minus[k, h, j] = pulp.LpVariable(
+          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
+    # 4. Variabel Jam Kerja Guru (d_h)
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
-    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
+    d_h_plus = {}
+    d_h_minus = {}
+    for g, h in dh_keys:
+      d_h_plus[g, h] = pulp.LpVariable(
+          f"dh_plus_{clean_str(g)}_{clean_str(h)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
+      d_h_minus[g, h] = pulp.LpVariable(
+          f"dh_minus_{clean_str(g)}_{clean_str(h)}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
+    # 5. Variabel Gap (Jeda Jam)
     gap_keys = []
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
+    z_gap = {}
+    for g, k, h, j in gap_keys:
+      z_gap[g, k, h, j] = pulp.LpVariable(
+          f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
+          lowBound=0,
+          cat=pulp.LpContinuous,
+      )
 
     # Constraints
     for g in mgmp_teachers:
@@ -287,7 +330,11 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(f"penalti_wali_{g}", lowBound=0)
+            p_c6 = pulp.LpVariable(
+                f"penalti_wali_{clean_str(g)}",
+                lowBound=0,
+                cat=pulp.LpContinuous,
+            )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -324,7 +371,11 @@ if st.button(
           for k in assigned_k:
             for j in JAM_HARI[h]:
               if j > 4:
-                p_c8 = pulp.LpVariable(f"penalti_pjok_{g}_{h}_{k}_{j}", lowBound=0)
+                p_c8 = pulp.LpVariable(
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{j}",
+                    lowBound=0,
+                    cat=pulp.LpContinuous,
+                )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
