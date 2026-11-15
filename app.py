@@ -321,8 +321,10 @@ if st.button(
     ]
     x = {
         (g, k, h, j): pulp.LpVariable(
-            str(f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}"),
-            cat=pulp.LpBinary,
+            f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
+            0,
+            1,
+            pulp.LpBinary,
         )
         for (g, k, h, j) in var_keys
     }
@@ -331,13 +333,13 @@ if st.button(
     pair_keys = [(str(g), str(k)) for (g, k) in valid_gk_pairs]
     d_pair_minus = {
         (g, k): pulp.LpVariable(
-            str(f"dp_minus_{clean_str(g)}_{clean_str(k)}"), lowBound=0
+            f"dp_minus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
         )
         for (g, k) in pair_keys
     }
     d_pair_plus = {
         (g, k): pulp.LpVariable(
-            str(f"dp_plus_{clean_str(g)}_{clean_str(k)}"), lowBound=0
+            f"dp_plus_{clean_str(g)}_{clean_str(k)}", 0, None, pulp.LpContinuous
         )
         for (g, k) in pair_keys
     }
@@ -351,7 +353,10 @@ if st.button(
     ]
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
-            str(f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}"), lowBound=0
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{int(j)}",
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (k, h, j) in c2_keys
     }
@@ -360,13 +365,16 @@ if st.button(
     dh_keys = [(str(g), str(h)) for g in GURU for h in HARI]
     d_h_plus = {
         (g, h): pulp.LpVariable(
-            str(f"dh_plus_{clean_str(g)}_{clean_str(h)}"), lowBound=0
+            f"dh_plus_{clean_str(g)}_{clean_str(h)}", 0, None, pulp.LpContinuous
         )
         for (g, h) in dh_keys
     }
     d_h_minus = {
         (g, h): pulp.LpVariable(
-            str(f"dh_minus_{clean_str(g)}_{clean_str(h)}"), lowBound=0
+            f"dh_minus_{clean_str(g)}_{clean_str(h)}",
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (g, h) in dh_keys
     }
@@ -381,8 +389,10 @@ if st.button(
 
     z_gap = {
         (g, k, h, j): pulp.LpVariable(
-            str(f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}"),
-            lowBound=0,
+            f"z_gap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{int(j)}",
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (g, k, h, j) in gap_keys
     }
@@ -461,7 +471,7 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(
-                str(f"penalti_wali_{clean_str(g)}"), lowBound=0
+                f"penalti_wali_{clean_str(g)}", 0, None, pulp.LpContinuous
             )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
@@ -499,10 +509,10 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    str(
-                        f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}"
-                    ),
-                    lowBound=0,
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k)}_{int(j)}",
+                    0,
+                    None,
+                    pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
