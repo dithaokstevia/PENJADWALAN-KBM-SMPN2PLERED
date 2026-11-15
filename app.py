@@ -303,9 +303,8 @@ if st.button(
         model += (
             pulp.lpSum([
                 x[g_w, k, h, 1]
-                for g_w in wakasek_teachers
-                for k in valid_gk_pairs
-                if (g_w, k) in valid_gk_pairs
+                for (g_w, k) in valid_gk_pairs
+                if g_w in wakasek_teachers
             ])
             <= 1
         )
