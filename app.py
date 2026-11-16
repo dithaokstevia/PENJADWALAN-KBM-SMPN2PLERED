@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import numpy as np
 import pandas as pd
 import pulp
 import streamlit as st
@@ -17,7 +18,7 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
-# Sidebar for file upload
+# Sidebar untuk upload file Excel
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
     "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
@@ -34,10 +35,10 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Initial DataFrames dengan default values yang VALID
+# Initial DataFrames
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM":,
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -52,9 +53,12 @@ df_status_init = pd.DataFrame({
     "Is_PJOK": ["0", "0"],
     "Is_MGMP": ["0", "0"],
 })
-df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [2, 2]}
-)
+df_beban_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B"],
+    "Kelas": ["7A", "7B"],
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
+    "Jam_Wajib":,
+})
 
 if excel_path is not None:
   try:
@@ -82,27 +86,28 @@ def safe_name(s):
   return res if res else "X"
 
 
-def create_var(name, low_bound=None, up_bound=None, is_binary=False):
-  """Universal PuLP variable factory compatible across PuLP 2.x and PuLP 3.x (Rust core)."""
-  cat_val = pulp.LpBinary if is_binary else pulp.LpContinuous
-  lb = 0 if is_binary else low_bound
-  ub = 1 if is_binary else up_bound
+def buat_dict_var(nama_prefix, daftar_kunci, lowBound=None, cat=pulp.LpContinuous):
+  """Pabrik variabel PuLP universal yang kompatibel untuk PuLP 2.x & PuLP 3.x"""
+  hasil = {}
+  for k in daftar_kunci:
+    if isinstance(k, (tuple, list)):
+      s_name = "_".join(safe_name(x) for x in k)
+    else:
+      s_name = safe_name(k)
+    var_name = f"{nama_prefix}_{s_name}"
 
-  try:
-    return pulp.LpVariable(name, lowBound=lb, upBound=ub, cat=cat_val)
-  except Exception:
-    pass
-  try:
-    return pulp.LpVariable(name, lb, ub, cat_val)
-  except Exception:
-    pass
-  v = pulp.LpVariable(name)
-  if lb is not None:
-    v.lowBound = lb
-  if ub is not None:
-    v.upBound = ub
-  v.cat = cat_val
-  return v
+    try:
+      v = pulp.LpVariable(var_name, lowBound=lowBound, cat=cat)
+    except Exception:
+      try:
+        v = pulp.LpVariable(var_name, lowBound, None, cat)
+      except Exception:
+        v = pulp.LpVariable(var_name)
+        if lowBound is not None:
+          v.lowBound = lowBound
+        v.cat = cat
+    hasil[k] = v
+  return hasil
 
 
 st.header("⚙️ Editor Parameter & Input Semester")
@@ -145,14 +150,14 @@ with tab_beban:
 
 st.divider()
 
-# Solver Execution Button
+# Tombol Eksekusi Solver
 if st.button(
     "🚀 Jalankan Optimasi Jadwal (BIP 0-1)",
     type="primary",
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
-    # Preprocess Data
+    # Preprocess Data Beban
     df_beban_raw["Guru"] = (
         df_beban_raw["Guru"].replace(r"^\s*$", None, regex=True).ffill()
     )
@@ -166,6 +171,12 @@ if st.button(
         .astype(int)
     )
 
+    col_mapel_beban = (
+        "Mata_Pelajaran"
+        if "Mata_Pelajaran" in df_beban_raw.columns
+        else ("Mapel" if "Mapel" in df_beban_raw.columns else None)
+    )
+
     INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
     df_beban = df_beban_raw[
         (~df_beban_raw["Guru"].str.upper().isin(INVALID_TEXTS))
@@ -177,6 +188,28 @@ if st.button(
     df_status = df_status_raw[
         ~df_status_raw["Guru"].str.upper().isin(INVALID_TEXTS)
     ].drop_duplicates(subset=["Guru"]).copy()
+
+    status_dict = (
+        df_status.set_index("Guru").to_dict("index")
+        if not df_status.empty
+        else {}
+    )
+
+    # Pemetaan Mapel ke Pasangan Guru & Kelas
+    pair_mapel = {}
+    for _, row in df_beban.iterrows():
+      g_name = row["Guru"]
+      k_name = row["Kelas"]
+      m_name = ""
+      if col_mapel_beban and pd.notna(row.get(col_mapel_beban)):
+        m_name = str(row.get(col_mapel_beban)).strip()
+
+      if not m_name:
+        st_info = status_dict.get(g_name, {})
+        m_name = str(st_info.get("Mata_Pelajaran", "")).strip()
+
+      pair_mapel[(g_name, k_name)] = m_name
+
     df_pair = df_beban.groupby(["Guru", "Kelas"], as_index=False)[
         "Jam_Wajib"
     ].sum()
@@ -197,11 +230,6 @@ if st.button(
 
     GURU = sorted(list(df_pair["Guru"].unique()))
     KELAS = sorted(list(df_pair["Kelas"].unique()))
-    status_dict = (
-        df_status.set_index("Guru").to_dict("index")
-        if not df_status.empty
-        else {}
-    )
     valid_gk_pairs = set(
         (row["Guru"], row["Kelas"])
         for _, row in df_pair.iterrows()
@@ -221,7 +249,7 @@ if st.button(
       ]:
         mgmp_teachers.add(g)
 
-    # Build PuLP Model
+    # Build Model PuLP
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
     var_keys = [
@@ -230,9 +258,18 @@ if st.button(
         for h in HARI
         for j in JAM_HARI[h]
     ]
+    x = buat_dict_var("x", var_keys, cat=pulp.LpBinary)
+
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
+    d_pair_minus = buat_dict_var("dpair_minus", pair_keys, lowBound=0)
+    d_pair_plus = buat_dict_var("dpair_plus", pair_keys, lowBound=0)
+
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
+    d_c2_minus = buat_dict_var("dc2_minus", c2_keys, lowBound=0)
+
     dh_keys = [(g, h) for g in GURU for h in HARI]
+    d_h_plus = buat_dict_var("dh_plus", dh_keys, lowBound=0)
+    d_h_minus = buat_dict_var("dh_minus", dh_keys, lowBound=0)
 
     gap_keys = []
     for g, k in valid_gk_pairs:
@@ -240,53 +277,9 @@ if st.button(
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
+    z_gap = buat_dict_var("z_gap", gap_keys, lowBound=0)
 
-    # Variable dictionaries
-    x = {
-        (g, k, h, j): create_var(
-            f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
-            is_binary=True,
-        )
-        for (g, k, h, j) in var_keys
-    }
-    d_pair_minus = {
-        (g, k): create_var(
-            f"dp_minus_{safe_name(g)}_{safe_name(k)}", low_bound=0
-        )
-        for (g, k) in pair_keys
-    }
-    d_pair_plus = {
-        (g, k): create_var(
-            f"dp_plus_{safe_name(g)}_{safe_name(k)}", low_bound=0
-        )
-        for (g, k) in pair_keys
-    }
-    d_c2_minus = {
-        (k, h, j): create_var(
-            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}", low_bound=0
-        )
-        for (k, h, j) in c2_keys
-    }
-    d_h_plus = {
-        (g, h): create_var(
-            f"dh_plus_{safe_name(g)}_{safe_name(h)}", low_bound=0
-        )
-        for (g, h) in dh_keys
-    }
-    d_h_minus = {
-        (g, h): create_var(
-            f"dh_minus_{safe_name(g)}_{safe_name(h)}", low_bound=0
-        )
-        for (g, h) in dh_keys
-    }
-    z_gap = {
-        (g, k, h, j): create_var(
-            f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}", low_bound=0
-        )
-        for (g, k, h, j) in gap_keys
-    }
-
-    # Constraints
+    # Kendala MGMP
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
       mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -357,7 +350,7 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = create_var(f"penalti_wali_{safe_name(g)}", low_bound=0)
+            p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(g)}", lowBound=0)
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -394,9 +387,9 @@ if st.button(
           for k in assigned_k:
             for j in JAM_HARI[h]:
               if j > 4:
-                p_c8 = create_var(
+                p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
-                    low_bound=0,
+                    lowBound=0,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
@@ -422,7 +415,20 @@ if st.button(
       records = []
       for (g, k, h, j), var in x.items():
         if var.varValue and var.varValue > 0.5:
-          records.append({"Hari": h, "Jam_Ke": j, "Kelas": k, "Guru": g})
+          mapel_name = pair_mapel.get((g, k), "")
+          records.append({
+              "Hari": h,
+              "Jam_Ke": j,
+              "Kelas": k,
+              "Mata_Pelajaran": mapel_name,
+              "Guru": g,
+              "Tampilan_Kelas": (
+                  f"{mapel_name} ({g})" if mapel_name else str(g)
+              ),
+              "Tampilan_Guru": (
+                  f"{k} ({mapel_name})" if mapel_name else str(k)
+              ),
+          })
 
       df_hasil = pd.DataFrame(records)
       df_hasil.sort_values(by=["Hari", "Jam_Ke", "Kelas"], inplace=True)
@@ -441,26 +447,30 @@ if st.button(
       ])
 
       with res_tab1:
-        st.subheader("Matriks Jadwal KBM per Kelas (Rombel)")
+        st.subheader("Matriks Jadwal KBM per Kelas (Mata Pelajaran & Guru)")
         pivot_kelas = df_hasil.pivot(
-            index=["Hari", "Jam_Ke"], columns="Kelas", values="Guru"
+            index=["Hari", "Jam_Ke"], columns="Kelas", values="Tampilan_Kelas"
         ).fillna("-")
         st.dataframe(pivot_kelas, use_container_width=True)
 
       with res_tab2:
-        st.subheader("Matriks Jadwal KBM per Guru")
+        st.subheader("Matriks Jadwal KBM per Guru (Kelas & Mata Pelajaran)")
         pivot_guru = df_hasil.pivot(
-            index=["Hari", "Jam_Ke"], columns="Guru", values="Kelas"
+            index=["Hari", "Jam_Ke"], columns="Guru", values="Tampilan_Guru"
         ).fillna("-")
         st.dataframe(pivot_guru, use_container_width=True)
 
       with res_tab3:
         st.subheader("Tabel Detail Penugasan")
-        st.dataframe(df_hasil, use_container_width=True)
+        df_master = df_hasil[
+            ["Hari", "Jam_Ke", "Kelas", "Mata_Pelajaran", "Guru"]
+        ]
+        st.dataframe(df_master, use_container_width=True)
 
+      # Download Option
       output = io.BytesIO()
       with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_hasil.to_excel(writer, sheet_name="Data_Penugasan", index=False)
+        df_master.to_excel(writer, sheet_name="Data_Penugasan", index=False)
         pivot_kelas.to_excel(writer, sheet_name="Jadwal_per_Kelas")
         pivot_guru.to_excel(writer, sheet_name="Jadwal_per_Guru")
       output.seek(0)
