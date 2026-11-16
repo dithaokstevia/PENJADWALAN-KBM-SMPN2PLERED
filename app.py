@@ -114,45 +114,40 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-if excel_path is None:
-  st.warning(
-      "⚠️ Silakan unggah file Excel `data_jadwal.xlsx` atau `data_jadwal(1).xlsx`"
-      " di sidebar untuk memulai."
-  )
-  st.stop()
+# Default Fallback DataFrames
+default_jam = [7] + [6] * 4
+df_config_init = pd.DataFrame({
+    "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
+    "Jumlah_Jam_KBM": default_jam,
+})
+df_mgmp_init = pd.DataFrame({
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
+    "Hari_MGMP": ["Kamis", "Rabu"],
+})
+df_status_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B"],
+    "Is_Wali": ["0", "0"],
+    "Is_Wakasek": ["0", "0"],
+    "Is_PJOK": ["0", "0"],
+    "Is_MGMP": ["0", "0"],
+})
+df_beban_init = pd.DataFrame(
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
+)
 
-# Load sheets
-try:
-  xls = pd.ExcelFile(excel_path)
-  df_config_init = (
-      pd.read_excel(xls, sheet_name="Config_Sekolah")
-      if "Config_Sekolah" in xls.sheet_names
-      else pd.DataFrame({
-          "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
-      })
-  )
-  df_mgmp_init = (
-      pd.read_excel(xls, sheet_name="Aturan_MGMP")
-      if "Aturan_MGMP" in xls.sheet_names
-      else pd.DataFrame({
-          "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-          "Hari_MGMP": ["Kamis", "Rabu"],
-      })
-  )
-  df_status_init = (
-      pd.read_excel(xls, sheet_name="Status_Guru")
-      if "Status_Guru" in xls.sheet_names
-      else pd.DataFrame()
-  )
-  df_beban_init = (
-      pd.read_excel(xls, sheet_name="Guru_Kelas")
-      if "Guru_Kelas" in xls.sheet_names
-      else pd.DataFrame()
-  )
-except Exception as e:
-  st.error(f"Gagal membaca file Excel: {e}")
-  st.stop()
+if excel_path is not None:
+  try:
+    xls = pd.ExcelFile(excel_path)
+    if "Config_Sekolah" in xls.sheet_names:
+      df_config_init = pd.read_excel(xls, sheet_name="Config_Sekolah")
+    if "Aturan_MGMP" in xls.sheet_names:
+      df_mgmp_init = pd.read_excel(xls, sheet_name="Aturan_MGMP")
+    if "Status_Guru" in xls.sheet_names:
+      df_status_init = pd.read_excel(xls, sheet_name="Status_Guru")
+    if "Guru_Kelas" in xls.sheet_names:
+      df_beban_init = pd.read_excel(xls, sheet_name="Guru_Kelas")
+  except Exception as e:
+    st.error(f"Gagal membaca file Excel: {e}")
 
 st.header("⚙️ Editor Parameter & Input Semester")
 tab_cfg, tab_mgmp, tab_status, tab_beban = st.tabs([
