@@ -75,7 +75,7 @@ def find_col(df, candidate_names, default_name=""):
       if name.lower() in c.lower() or c.lower() in name.lower():
         return df.columns[idx]
   if len(df.columns) > 0:
-    return df.columns[0]
+    return df.columns
   return str(default_name)
 
 
@@ -123,7 +123,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM":,
+          "Jumlah_Jam_KBM": list((7, 6, 6, 6, 6)),
       })
   )
   df_mgmp_init = (
@@ -329,7 +329,7 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_prim_int(j_list[idx])))
 
-    # PuLP LpVariable.dicts creates robust variables with tuple keys
+    # PuLP LpVariable.dicts
     x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
     d_pair_minus = pulp.LpVariable.dicts(
         "dp_minus", pair_keys, lowBound=0, cat=pulp.LpContinuous
