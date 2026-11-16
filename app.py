@@ -7,82 +7,89 @@ import pulp
 import streamlit as st
 
 
-def clean_str(val):
+def unwrap_scalar_str(val, default=""):
   if val is None:
-    return ""
-  if isinstance(val, (pd.Series, pd.DataFrame, np.ndarray, list, tuple)):
-    if hasattr(val, "values"):
-      vals = val.values.flatten()
+    return default
+  while isinstance(
+      val, (pd.Series, pd.DataFrame, pd.Index, np.ndarray, list, tuple)
+  ):
+    if hasattr(val, "empty") and val.empty:
+      return default
+    if hasattr(val, "iloc"):
+      val = val.iloc[0]
+    elif len(val) > 0:
+      val = val[0]
     else:
-      vals = list(val)
-    for item in vals:
-      s = clean_str(item)
-      if s:
-        return s
-    return ""
+      return default
   try:
     if pd.isna(val):
-      return ""
+      return default
   except Exception:
     pass
   s = str(val).strip()
   if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT", "<NA>"]:
-    return ""
+    return default
   return s
 
 
-def clean_int(val, default=0):
-  s = clean_str(val)
-  if not s:
+def unwrap_scalar_int(val, default=0):
+  sc = unwrap_scalar_str(val, None)
+  if sc is None:
     return default
   try:
-    return int(float(s))
+    return int(float(sc))
   except Exception:
     return default
 
 
 def safe_var_name(s):
-  sc = clean_str(s)
+  sc = unwrap_scalar_str(s, "X")
   res = re.sub(r"\W+", "_", sc).strip("_")
   return res if res else "X"
 
 
-def sanitize_dataframe(df):
+def sanitize_df(df):
   if df is None or not isinstance(df, pd.DataFrame) or df.empty:
     return pd.DataFrame()
   df = df.copy()
   if isinstance(df.columns, pd.MultiIndex):
-    df.columns = [
-        "_".join([str(c).strip() for c in col if str(c).strip()])
-        for col in df.columns
-    ]
+    flat_cols = []
+    for col in df.columns:
+      parts = [
+          str(c).strip()
+          for c in col
+          if pd.notna(c)
+          and str(c).strip()
+          and not str(c).startswith("Unnamed")
+      ]
+      flat_cols.append("_".join(parts) if parts else "Col")
+    df.columns = flat_cols
   df.columns = [str(c).strip() for c in df.columns]
   seen = {}
-  new_cols = []
+  unique_cols = []
   for c in df.columns:
     if c in seen:
       seen[c] += 1
-      new_cols.append(f"{c}_{seen[c]}")
+      unique_cols.append(f"{c}_{seen[c]}")
     else:
       seen[c] = 0
-      new_cols.append(c)
-  df.columns = new_cols
+      unique_cols.append(c)
+  df.columns = unique_cols
   return df
 
 
-def find_col(df, candidate_names, default_name=""):
-  if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-    return str(default_name)
-  cols = [str(c).strip() for c in df.columns]
+def find_col(df, candidate_names, default=""):
+  if df is None or df.empty:
+    return str(default)
   for name in candidate_names:
-    for idx, c in enumerate(cols):
-      if c.lower() == name.lower():
-        return str(df.columns[idx])
+    for c in df.columns:
+      if str(c).strip().lower() == name.lower():
+        return str(c)
   for name in candidate_names:
-    for idx, c in enumerate(cols):
-      if name.lower() in c.lower() or c.lower() in name.lower():
-        return str(df.columns[idx])
-  return str(default_name)
+    for c in df.columns:
+      if name.lower() in str(c).strip().lower():
+        return str(c)
+  return str(default)
 
 
 st.set_page_config(
@@ -202,10 +209,10 @@ if st.button(
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
     # Sanitize dataframes first
-    df_beban_raw = sanitize_dataframe(df_beban_edited)
-    df_config_raw = sanitize_dataframe(df_config_edited)
-    df_status_raw = sanitize_dataframe(df_status_edited)
-    df_mgmp_raw = sanitize_dataframe(df_mgmp_edited)
+    df_beban_raw = sanitize_df(df_beban_edited)
+    df_config_raw = sanitize_df(df_config_edited)
+    df_status_raw = sanitize_df(df_status_edited)
+    df_mgmp_raw = sanitize_df(df_mgmp_edited)
 
     # 1. Config KBM
     col_hari = find_col(df_config_raw, ["Hari", "Nama_Hari", "Day"], "Hari")
@@ -218,8 +225,8 @@ if st.button(
     JAM_HARI = {}
     if not df_config_raw.empty and col_hari in df_config_raw.columns:
       for _, r in df_config_raw.iterrows():
-        h_val = clean_str(r.get(col_hari))
-        j_cnt = clean_int(r.get(col_jam_cnt), 6)
+        h_val = unwrap_scalar_str(r.get(col_hari))
+        j_cnt = unwrap_scalar_int(r.get(col_jam_cnt), 6)
         if h_val:
           HARI.append(h_val)
           JAM_HARI[h_val] = list(range(1, j_cnt + 1))
@@ -240,8 +247,8 @@ if st.button(
     HARI_MGMP_MAPEL = {}
     if not df_mgmp_raw.empty:
       for _, r in df_mgmp_raw.iterrows():
-        m_name = clean_str(r.get(col_mgmp_mapel)).upper()
-        h_mgmp = clean_str(r.get(col_mgmp_hari))
+        m_name = unwrap_scalar_str(r.get(col_mgmp_mapel)).upper()
+        h_mgmp = unwrap_scalar_str(r.get(col_mgmp_hari))
         if m_name and h_mgmp:
           HARI_MGMP_MAPEL[m_name] = h_mgmp
 
@@ -252,14 +259,14 @@ if st.button(
     status_dict = {}
     if not df_status_raw.empty and col_status_guru in df_status_raw.columns:
       for _, r in df_status_raw.iterrows():
-        g_key = clean_str(r.get(col_status_guru))
+        g_key = unwrap_scalar_str(r.get(col_status_guru))
         if (
             g_key
             and g_key.upper() not in ["NAN", "NONE", "", "NULL"]
             and g_key not in status_dict
         ):
           status_dict[g_key] = {
-              k: clean_str(v) for k, v in r.to_dict().items()
+              k: unwrap_scalar_str(v) for k, v in r.to_dict().items()
           }
 
     # 4. Beban Mengajar (Guru_Kelas)
@@ -275,13 +282,13 @@ if st.button(
     if not df_beban_raw.empty and col_guru in df_beban_raw.columns:
       last_guru = None
       for _, r in df_beban_raw.iterrows():
-        g_val = clean_str(r.get(col_guru))
+        g_val = unwrap_scalar_str(r.get(col_guru))
         if g_val:
           last_guru = g_val
         else:
           g_val = last_guru
-        k_val = clean_str(r.get(col_kelas)).upper()
-        jw_val = clean_int(r.get(col_jw), 0)
+        k_val = unwrap_scalar_str(r.get(col_kelas)).upper()
+        jw_val = unwrap_scalar_int(r.get(col_jw), 0)
         if g_val and k_val and jw_val > 0:
           clean_records.append(
               {"Guru": g_val, "Kelas": k_val, "Jam_Wajib": jw_val}
@@ -296,14 +303,14 @@ if st.button(
         "Jam_Wajib"
     ].sum()
 
-    GURU = sorted(list(set(clean_str(g) for g in df_pair["Guru"])))
-    KELAS = sorted(list(set(clean_str(k) for k in df_pair["Kelas"])))
+    GURU = sorted(list(set(unwrap_scalar_str(g) for g in df_pair["Guru"])))
+    KELAS = sorted(list(set(unwrap_scalar_str(k) for k in df_pair["Kelas"])))
 
     valid_gk_pairs = []
     for _, row in df_pair.iterrows():
-      g_i = clean_str(row["Guru"])
-      k_i = clean_str(row["Kelas"])
-      jw_i = clean_int(row["Jam_Wajib"])
+      g_i = unwrap_scalar_str(row["Guru"])
+      k_i = unwrap_scalar_str(row["Kelas"])
+      jw_i = unwrap_scalar_int(row["Jam_Wajib"])
       if g_i and k_i and jw_i > 0:
         valid_gk_pairs.append((g_i, k_i))
 
@@ -312,7 +319,7 @@ if st.button(
     mgmp_teachers = set()
     for g in GURU:
       st_info = status_dict.get(g, {})
-      val = clean_str(st_info.get("Is_MGMP")).upper()
+      val = unwrap_scalar_str(st_info.get("Is_MGMP")).upper()
       if val in ["1", "1.0", "TRUE", "Y", "YES"]:
         mgmp_teachers.add(g)
 
@@ -321,30 +328,34 @@ if st.button(
 
     var_keys = []
     for g, k in valid_gk_pairs:
-      sg, sk = clean_str(g), clean_str(k)
+      sg, sk = unwrap_scalar_str(g), unwrap_scalar_str(k)
       for h in HARI:
-        sh = clean_str(h)
+        sh = unwrap_scalar_str(h)
         for j in JAM_HARI.get(sh, []):
-          sj = clean_int(j)
+          sj = unwrap_scalar_int(j)
           var_keys.append((sg, sk, sh, sj))
 
-    pair_keys = [(clean_str(g), clean_str(k)) for (g, k) in valid_gk_pairs]
+    pair_keys = [
+        (unwrap_scalar_str(g), unwrap_scalar_str(k)) for (g, k) in valid_gk_pairs
+    ]
     c2_keys = [
-        (clean_str(k), clean_str(h), clean_int(j))
+        (unwrap_scalar_str(k), unwrap_scalar_str(h), unwrap_scalar_int(j))
         for k in KELAS
         for h in HARI
-        for j in JAM_HARI.get(clean_str(h), [])
+        for j in JAM_HARI.get(unwrap_scalar_str(h), [])
     ]
-    dh_keys = [(clean_str(g), clean_str(h)) for g in GURU for h in HARI]
+    dh_keys = [
+        (unwrap_scalar_str(g), unwrap_scalar_str(h)) for g in GURU for h in HARI
+    ]
 
     gap_keys = []
     for g, k in valid_gk_pairs:
-      sg, sk = clean_str(g), clean_str(k)
+      sg, sk = unwrap_scalar_str(g), unwrap_scalar_str(k)
       for h in HARI:
-        sh = clean_str(h)
+        sh = unwrap_scalar_str(h)
         j_list = JAM_HARI.get(sh, [])
         for idx in range(len(j_list) - 2):
-          gap_keys.append((sg, sk, sh, clean_int(j_list[idx])))
+          gap_keys.append((sg, sk, sh, unwrap_scalar_int(j_list[idx])))
 
     # Decision Variables
     x = {}
@@ -398,7 +409,7 @@ if st.button(
     # Constraints
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
-      mapel_raw = clean_str(st_info.get("Mata_Pelajaran"))
+      mapel_raw = unwrap_scalar_str(st_info.get("Mata_Pelajaran"))
       mapel_list = [
           m.strip().upper() for m in mapel_raw.split(",") if m.strip()
       ]
@@ -408,7 +419,7 @@ if st.button(
           assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
           for k_i in assigned_k:
             for j in JAM_HARI.get(h_mgmp, []):
-              j_i = clean_int(j)
+              j_i = unwrap_scalar_int(j)
               if j_i > 2 and (g, k_i, h_mgmp, j_i) in x:
                 model += x[g, k_i, h_mgmp, j_i] == 0
 
@@ -419,7 +430,7 @@ if st.button(
       if assigned_k:
         for h in HARI:
           for j in JAM_HARI.get(h, []):
-            j_i = clean_int(j)
+            j_i = unwrap_scalar_int(j)
             if any((g, k_i, h, j_i) in x for k_i in assigned_k):
               model += (
                   pulp.lpSum([
@@ -435,7 +446,7 @@ if st.button(
       if assigned_g:
         for h in HARI:
           for j in JAM_HARI.get(h, []):
-            j_i = clean_int(j)
+            j_i = unwrap_scalar_int(j)
             if (k, h, j_i) in d_c2_minus:
               model += (
                   pulp.lpSum([
@@ -449,17 +460,17 @@ if st.button(
 
     for _, row in df_pair.iterrows():
       g, k, jw = (
-          clean_str(row["Guru"]),
-          clean_str(row["Kelas"]),
-          clean_int(row["Jam_Wajib"]),
+          unwrap_scalar_str(row["Guru"]),
+          unwrap_scalar_str(row["Kelas"]),
+          unwrap_scalar_int(row["Jam_Wajib"]),
       )
       if (g, k) in d_pair_minus and (g, k) in d_pair_plus:
         model += (
             pulp.lpSum([
-                x[g, k, h, clean_int(j)]
+                x[g, k, h, unwrap_scalar_int(j)]
                 for h in HARI
                 for j in JAM_HARI.get(h, [])
-                if (g, k, h, clean_int(j)) in x
+                if (g, k, h, unwrap_scalar_int(j)) in x
             ])
             + d_pair_minus[g, k]
             - d_pair_plus[g, k]
@@ -471,9 +482,9 @@ if st.button(
         j_list = JAM_HARI.get(h, [])
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = (
-              clean_int(j_list[idx]),
-              clean_int(j_list[idx + 1]),
-              clean_int(j_list[idx + 2]),
+              unwrap_scalar_int(j_list[idx]),
+              unwrap_scalar_int(j_list[idx + 1]),
+              unwrap_scalar_int(j_list[idx + 2]),
           )
           if (
               (g, k, h, j1) in x
@@ -491,9 +502,9 @@ if st.button(
 
     for g in GURU:
       st_info = status_dict.get(g, {})
-      is_wali_val = clean_str(st_info.get("Is_Wali")).upper()
+      is_wali_val = unwrap_scalar_str(st_info.get("Is_Wali")).upper()
       if is_wali_val in ["1", "1.0", "TRUE", "Y", "YES"]:
-        k_wali = clean_str(st_info.get("Kelas_Wali")).upper()
+        k_wali = unwrap_scalar_str(st_info.get("Kelas_Wali")).upper()
         if (
             (g, k_wali) in valid_gk_pairs
             and "Jumat" in HARI
@@ -508,7 +519,7 @@ if st.button(
     wakasek_teachers = [
         g
         for g in GURU
-        if clean_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
+        if unwrap_scalar_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
         in ["1", "1.0", "TRUE", "Y", "YES"]
     ]
     if wakasek_teachers:
@@ -524,13 +535,15 @@ if st.button(
         )
 
     for g in GURU:
-      is_pjok_val = clean_str(status_dict.get(g, {}).get("Is_PJOK")).upper()
+      is_pjok_val = unwrap_scalar_str(
+          status_dict.get(g, {}).get("Is_PJOK")
+      ).upper()
       if is_pjok_val in ["1", "1.0", "TRUE", "Y", "YES"]:
         assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
         for h in HARI:
           for k_i in assigned_k:
             for j in JAM_HARI.get(h, []):
-              j_i = clean_int(j)
+              j_i = unwrap_scalar_int(j)
               if j_i > 4 and (g, k_i, h, j_i) in x:
                 p_c8 = pulp.LpVariable(
                     str(
