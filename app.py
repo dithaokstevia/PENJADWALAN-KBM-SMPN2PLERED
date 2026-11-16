@@ -9,13 +9,21 @@ import streamlit as st
 def to_scalar(val, default=None):
   if val is None:
     return default
-  if isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
-    vals = val.tolist() if hasattr(val, "tolist") else list(val)
-    for item in vals:
-      res = to_scalar(item, None)
-      if res is not None:
-        return res
-    return default
+  while isinstance(
+      val, (pd.Series, pd.DataFrame, pd.Index, np.ndarray, list, tuple)
+  ):
+    if isinstance(val, pd.DataFrame):
+      if val.empty:
+        return default
+      val = val.iloc[0, 0]
+    elif isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
+      if len(val) == 0:
+        return default
+      val = (
+          val[0]
+          if isinstance(val, (list, tuple))
+          else (val.iloc[0] if hasattr(val, "iloc") else val[0])
+      )
   try:
     if pd.isna(val):
       return default
@@ -24,7 +32,7 @@ def to_scalar(val, default=None):
   s = str(val).strip()
   if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT", "<NA>"]:
     return default
-  return val
+  return s
 
 
 def to_prim_str(val, default=""):
@@ -342,43 +350,48 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_prim_int(j_list[idx])))
 
-    # Explicit dictionary comprehensions with 100% scalar strings and integers
+    # Dictionary comprehension guaranteed 100% scalar primitive keys
     x = {}
     for g, k, h, j in var_keys:
       vname = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
       x[(g, k, h, j)] = pulp.LpVariable(vname, cat=pulp.LpBinary)
 
-    d_pair_minus = {}
-    d_pair_plus = {}
-    for g, k in pair_keys:
-      d_pair_minus[(g, k)] = pulp.LpVariable(
-          f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
-      )
-      d_pair_plus[(g, k)] = pulp.LpVariable(
-          f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
-      )
-
-    d_c2_minus = {}
-    for k, h, j in c2_keys:
-      d_c2_minus[(k, h, j)] = pulp.LpVariable(
-          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
-      )
-
-    d_h_plus = {}
-    d_h_minus = {}
-    for g, h in dh_keys:
-      d_h_plus[(g, h)] = pulp.LpVariable(
-          f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
-      )
-      d_h_minus[(g, h)] = pulp.LpVariable(
-          f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
-      )
-
-    z_gap = {}
-    for g, k, h, j in gap_keys:
-      z_gap[(g, k, h, j)] = pulp.LpVariable(
-          f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
-      )
+    d_pair_minus = {
+        (g, k): pulp.LpVariable(
+            f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
+    d_pair_plus = {
+        (g, k): pulp.LpVariable(
+            f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
+    d_c2_minus = {
+        (k, h, j): pulp.LpVariable(
+            f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+        )
+        for (k, h, j) in c2_keys
+    }
+    d_h_plus = {
+        (g, h): pulp.LpVariable(
+            f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
+    d_h_minus = {
+        (g, h): pulp.LpVariable(
+            f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
+    z_gap = {
+        (g, k, h, j): pulp.LpVariable(
+            f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+        )
+        for (g, k, h, j) in gap_keys
+    }
 
     # Constraints
     for g in mgmp_teachers:
