@@ -30,7 +30,7 @@ def force_str(val, default=""):
   s = str(val).strip()
   if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT", "<NA>"]:
     return default
-  return s
+  return str(s)
 
 
 def force_int(val, default=0):
@@ -66,16 +66,7 @@ def sanitize_df(df):
       flat.append("_".join(parts) if parts else "Col")
     df.columns = flat
   df.columns = [str(c).strip() for c in df.columns]
-  seen = {}
-  unique_cols = []
-  for c in df.columns:
-    if c in seen:
-      seen[c] += 1
-      unique_cols.append(f"{c}_{seen[c]}")
-    else:
-      seen[c] = 0
-      unique_cols.append(c)
-  df.columns = unique_cols
+  df = df.loc[:, ~df.columns.duplicated()].copy()
   return df
 
 
@@ -142,11 +133,9 @@ df_status_init = pd.DataFrame({
     "Is_PJOK": ["0", "0"],
     "Is_MGMP": ["0", "0"],
 })
-df_beban_init = pd.DataFrame({
-    "Guru": ["Guru A", "Guru B"],
-    "Kelas": ["7A", "7B"],
-    "Jam_Wajib": [4, 4],
-})
+df_beban_init = pd.DataFrame(
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
+)
 
 if excel_path is not None:
   try:
@@ -304,7 +293,7 @@ if st.button(
         jw_val = force_int(r.get(col_jw), 0)
         if g_val and k_val and jw_val > 0:
           clean_records.append(
-              {"Guru": g_val, "Kelas": k_val, "Jam_Wajib": jw_val}
+              {"Guru": str(g_val), "Kelas": str(k_val), "Jam_Wajib": int(jw_val)}
           )
 
     if not clean_records:
@@ -367,42 +356,51 @@ if st.button(
           gap_keys.append((sg, sk, sh, force_int(j_list[idx])))
 
     # Create Decision Variables explicitly with plain Python dicts
-    x = {}
-    for g, k, h, j in var_keys:
-      vname = f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}"
-      x[(g, k, h, j)] = pulp.LpVariable(vname, cat=pulp.LpBinary)
-
-    d_pair_minus = {}
-    d_pair_plus = {}
-    for g, k in pair_keys:
-      d_pair_minus[(g, k)] = pulp.LpVariable(
-          f"dp_minus_{safe_name(g)}_{safe_name(k)}", lowBound=0
-      )
-      d_pair_plus[(g, k)] = pulp.LpVariable(
-          f"dp_plus_{safe_name(g)}_{safe_name(k)}", lowBound=0
-      )
-
-    d_c2_minus = {}
-    for k, h, j in c2_keys:
-      d_c2_minus[(k, h, j)] = pulp.LpVariable(
-          f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}", lowBound=0
-      )
-
-    d_h_plus = {}
-    d_h_minus = {}
-    for g, h in dh_keys:
-      d_h_plus[(g, h)] = pulp.LpVariable(
-          f"dh_plus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-      )
-      d_h_minus[(g, h)] = pulp.LpVariable(
-          f"dh_minus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-      )
-
-    z_gap = {}
-    for g, k, h, j in gap_keys:
-      z_gap[(g, k, h, j)] = pulp.LpVariable(
-          f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}", lowBound=0
-      )
+    x = {
+        key: pulp.LpVariable(
+            f"x_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}_{key[3]}",
+            cat=pulp.LpBinary,
+        )
+        for key in var_keys
+    }
+    d_pair_minus = {
+        key: pulp.LpVariable(
+            f"dp_minus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
+        )
+        for key in pair_keys
+    }
+    d_pair_plus = {
+        key: pulp.LpVariable(
+            f"dp_plus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
+        )
+        for key in pair_keys
+    }
+    d_c2_minus = {
+        key: pulp.LpVariable(
+            f"dc2_minus_{safe_name(key[0])}_{safe_name(key[1])}_{key[2]}",
+            lowBound=0,
+        )
+        for key in c2_keys
+    }
+    d_h_plus = {
+        key: pulp.LpVariable(
+            f"dh_plus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
+        )
+        for key in dh_keys
+    }
+    d_h_minus = {
+        key: pulp.LpVariable(
+            f"dh_minus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
+        )
+        for key in dh_keys
+    }
+    z_gap = {
+        key: pulp.LpVariable(
+            f"zgap_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}_{key[3]}",
+            lowBound=0,
+        )
+        for key in gap_keys
+    }
 
     # Constraints
     for g in mgmp_teachers:
