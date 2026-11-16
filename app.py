@@ -7,72 +7,6 @@ import pulp
 import streamlit as st
 
 
-def create_var(name, lowBound=None, upBound=None, cat=pulp.LpContinuous):
-  """Robust multi-version PuLP LpVariable factory function compatible with PuLP 2.x, 3.x, and Python 3.14+."""
-  # Attempt 1: PuLP 2.x standard camelCase (lowBound, upBound)
-  kwargs = {}
-  if cat is not None:
-    kwargs['cat'] = cat
-  if lowBound is not None:
-    kwargs['lowBound'] = lowBound
-  if upBound is not None:
-    kwargs['upBound'] = upBound
-  try:
-    return pulp.LpVariable(name, **kwargs)
-  except TypeError:
-    pass
-
-  # Attempt 2: PuLP 3.x snake_case (low_bound, up_bound)
-  kwargs = {}
-  if cat is not None:
-    kwargs['cat'] = cat
-  if lowBound is not None:
-    kwargs['low_bound'] = lowBound
-  if upBound is not None:
-    kwargs['up_bound'] = upBound
-  try:
-    return pulp.LpVariable(name, **kwargs)
-  except TypeError:
-    pass
-
-  # Attempt 3: bounds tuple
-  kwargs = {}
-  if cat is not None:
-    kwargs['cat'] = cat
-  if lowBound is not None or upBound is not None:
-    kwargs['bounds'] = (lowBound, upBound)
-  try:
-    return pulp.LpVariable(name, **kwargs)
-  except TypeError:
-    pass
-
-  # Attempt 4: cat only or name only
-  try:
-    v = pulp.LpVariable(name, cat=cat)
-  except TypeError:
-    v = pulp.LpVariable(name)
-
-  if lowBound is not None:
-    try:
-      v.lowBound = lowBound
-    except Exception:
-      try:
-        v.low_bound = lowBound
-      except Exception:
-        pass
-
-  if upBound is not None:
-    try:
-      v.upBound = upBound
-    except Exception:
-      try:
-        v.up_bound = upBound
-      except Exception:
-        pass
-
-  return v
-
-
 def force_str(val, default=""):
   if val is None:
     return default
@@ -184,7 +118,7 @@ else:
 # Default Initial DataFrames
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM":,
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -200,7 +134,7 @@ df_status_init = pd.DataFrame({
     "Is_MGMP": ["0", "0"],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
 )
 
 if excel_path is not None:
@@ -418,67 +352,61 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables using robust create_var factory
+    # Create Decision Variables using 4 positional arguments for 100% PuLP 2.x and PuLP 3.x compatibility
     x = {
-        (sg, sk, sh, sj): create_var(
+        (sg, sk, sh, sj): pulp.LpVariable(
             f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            lowBound=0,
-            upBound=1,
-            cat=pulp.LpBinary,
+            0,
+            1,
+            pulp.LpBinary,
         )
         for (sg, sk, sh, sj) in var_keys
     }
 
     d_pair_minus = {
-        (sg, sk): create_var(
-            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
+        (sg, sk): pulp.LpVariable(
+            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}", 0, None, pulp.LpContinuous
         )
         for (sg, sk) in pair_keys
     }
 
     d_pair_plus = {
-        (sg, sk): create_var(
-            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
+        (sg, sk): pulp.LpVariable(
+            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}", 0, None, pulp.LpContinuous
         )
         for (sg, sk) in pair_keys
     }
 
     d_c2_minus = {
-        (sk, sh, sj): create_var(
+        (sk, sh, sj): pulp.LpVariable(
             f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (sk, sh, sj) in c2_keys
     }
 
     d_h_plus = {
-        (sg, sh): create_var(
-            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
+        (sg, sh): pulp.LpVariable(
+            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}", 0, None, pulp.LpContinuous
         )
         for (sg, sh) in dh_keys
     }
 
     d_h_minus = {
-        (sg, sh): create_var(
-            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
+        (sg, sh): pulp.LpVariable(
+            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}", 0, None, pulp.LpContinuous
         )
         for (sg, sh) in dh_keys
     }
 
     z_gap = {
-        (sg, sk, sh, sj): create_var(
+        (sg, sk, sh, sj): pulp.LpVariable(
             f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            lowBound=0,
-            cat=pulp.LpContinuous,
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (sg, sk, sh, sj) in gap_keys
     }
@@ -595,10 +523,8 @@ if st.button(
             and "Jumat" in HARI
             and (sg, k_wali, "Jumat", 1) in x
         ):
-          p_c6 = create_var(
-              f"penalti_wali_{safe_name(sg)}",
-              lowBound=0,
-              cat=pulp.LpContinuous,
+          p_c6 = pulp.LpVariable(
+              f"penalti_wali_{safe_name(sg)}", 0, None, pulp.LpContinuous
           )
           penalti_list.append(p_c6)
           model += x[(sg, k_wali, "Jumat", 1)] + p_c6 >= 1
@@ -633,10 +559,11 @@ if st.button(
             for j in JAM_HARI.get(sh, []):
               j_i = int(j)
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
-                p_c8 = create_var(
+                p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
-                    lowBound=0,
-                    cat=pulp.LpContinuous,
+                    0,
+                    None,
+                    pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[(sg, sk_i, sh, j_i)] - p_c8 <= 0
