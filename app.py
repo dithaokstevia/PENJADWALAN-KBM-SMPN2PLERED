@@ -7,6 +7,72 @@ import pulp
 import streamlit as st
 
 
+def create_var(name, lowBound=None, upBound=None, cat=pulp.LpContinuous):
+  """Robust multi-version PuLP LpVariable factory function compatible with PuLP 2.x, 3.x, and Python 3.14+."""
+  # Attempt 1: PuLP 2.x standard camelCase (lowBound, upBound)
+  kwargs = {}
+  if cat is not None:
+    kwargs['cat'] = cat
+  if lowBound is not None:
+    kwargs['lowBound'] = lowBound
+  if upBound is not None:
+    kwargs['upBound'] = upBound
+  try:
+    return pulp.LpVariable(name, **kwargs)
+  except TypeError:
+    pass
+
+  # Attempt 2: PuLP 3.x snake_case (low_bound, up_bound)
+  kwargs = {}
+  if cat is not None:
+    kwargs['cat'] = cat
+  if lowBound is not None:
+    kwargs['low_bound'] = lowBound
+  if upBound is not None:
+    kwargs['up_bound'] = upBound
+  try:
+    return pulp.LpVariable(name, **kwargs)
+  except TypeError:
+    pass
+
+  # Attempt 3: bounds tuple
+  kwargs = {}
+  if cat is not None:
+    kwargs['cat'] = cat
+  if lowBound is not None or upBound is not None:
+    kwargs['bounds'] = (lowBound, upBound)
+  try:
+    return pulp.LpVariable(name, **kwargs)
+  except TypeError:
+    pass
+
+  # Attempt 4: cat only or name only
+  try:
+    v = pulp.LpVariable(name, cat=cat)
+  except TypeError:
+    v = pulp.LpVariable(name)
+
+  if lowBound is not None:
+    try:
+      v.lowBound = lowBound
+    except Exception:
+      try:
+        v.low_bound = lowBound
+      except Exception:
+        pass
+
+  if upBound is not None:
+    try:
+      v.upBound = upBound
+    except Exception:
+      try:
+        v.up_bound = upBound
+      except Exception:
+        pass
+
+  return v
+
+
 def force_str(val, default=""):
   if val is None:
     return default
@@ -352,9 +418,9 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables
+    # Create Decision Variables using robust create_var factory
     x = {
-        (sg, sk, sh, sj): pulp.LpVariable(
+        (sg, sk, sh, sj): create_var(
             f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
             lowBound=0,
             upBound=1,
@@ -364,7 +430,7 @@ if st.button(
     }
 
     d_pair_minus = {
-        (sg, sk): pulp.LpVariable(
+        (sg, sk): create_var(
             f"dp_minus_{safe_name(sg)}_{safe_name(sk)}",
             lowBound=0,
             cat=pulp.LpContinuous,
@@ -373,7 +439,7 @@ if st.button(
     }
 
     d_pair_plus = {
-        (sg, sk): pulp.LpVariable(
+        (sg, sk): create_var(
             f"dp_plus_{safe_name(sg)}_{safe_name(sk)}",
             lowBound=0,
             cat=pulp.LpContinuous,
@@ -382,7 +448,7 @@ if st.button(
     }
 
     d_c2_minus = {
-        (sk, sh, sj): pulp.LpVariable(
+        (sk, sh, sj): create_var(
             f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}",
             lowBound=0,
             cat=pulp.LpContinuous,
@@ -391,7 +457,7 @@ if st.button(
     }
 
     d_h_plus = {
-        (sg, sh): pulp.LpVariable(
+        (sg, sh): create_var(
             f"dh_plus_{safe_name(sg)}_{safe_name(sh)}",
             lowBound=0,
             cat=pulp.LpContinuous,
@@ -400,7 +466,7 @@ if st.button(
     }
 
     d_h_minus = {
-        (sg, sh): pulp.LpVariable(
+        (sg, sh): create_var(
             f"dh_minus_{safe_name(sg)}_{safe_name(sh)}",
             lowBound=0,
             cat=pulp.LpContinuous,
@@ -409,7 +475,7 @@ if st.button(
     }
 
     z_gap = {
-        (sg, sk, sh, sj): pulp.LpVariable(
+        (sg, sk, sh, sj): create_var(
             f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
             lowBound=0,
             cat=pulp.LpContinuous,
@@ -529,7 +595,7 @@ if st.button(
             and "Jumat" in HARI
             and (sg, k_wali, "Jumat", 1) in x
         ):
-          p_c6 = pulp.LpVariable(
+          p_c6 = create_var(
               f"penalti_wali_{safe_name(sg)}",
               lowBound=0,
               cat=pulp.LpContinuous,
@@ -567,7 +633,7 @@ if st.button(
             for j in JAM_HARI.get(sh, []):
               j_i = int(j)
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
-                p_c8 = pulp.LpVariable(
+                p_c8 = create_var(
                     f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
                     lowBound=0,
                     cat=pulp.LpContinuous,
