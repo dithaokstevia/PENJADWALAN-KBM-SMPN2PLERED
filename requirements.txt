@@ -1,4 +1,4 @@
 streamlit
-pulp
 pandas
 openpyxl
+pulp==2.8.0
