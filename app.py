@@ -115,10 +115,10 @@ else:
       excel_path = possible_name
       break
 
-# Default Initial DataFrames
+# Default Initial DataFrames dengan nilai terdefinisi secara utuh
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM":,
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -134,7 +134,7 @@ df_status_init = pd.DataFrame({
     "Is_MGMP": ["0", "0"],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
 )
 
 if excel_path is not None:
