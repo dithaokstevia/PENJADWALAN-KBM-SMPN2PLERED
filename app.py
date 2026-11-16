@@ -624,4 +624,3 @@ if st.button(
           "❌ Solver tidak menemukan solusi yang valid. Periksa kembali batasan"
           " atau jam wajib."
       )
-📊 Saran:
