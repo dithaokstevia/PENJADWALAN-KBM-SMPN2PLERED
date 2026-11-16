@@ -20,7 +20,7 @@ def to_str(val, default=""):
     elif isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
       if len(val) == 0:
         return default
-      val = val.iloc[0] if hasattr(val, "iloc") else val[0]
+      val = val[0]
   try:
     if pd.isna(val):
       return default
@@ -340,7 +340,7 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_int(j_list[idx])))
 
-    # Dict comprehension guaranteed 100% scalar primitive strings for vname
+    # Guaranteed pure string vname
     x = {}
     for g, k, h, j in var_keys:
       vname = str(
@@ -538,9 +538,9 @@ if st.button(
     model += (
         100000.0
         * pulp.lpSum(
-            [d_pair_minus[g, k] + d_pair_plus[g, k] for g, k in pair_keys]
+            [d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys]
         )
-        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for k, h, j in c2_keys])
+        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for (k, h, j) in c2_keys])
         + 50000.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
         + 1000.0 * pulp.lpSum(penalti_list)
         + 2.0
