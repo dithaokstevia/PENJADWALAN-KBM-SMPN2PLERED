@@ -7,7 +7,7 @@ import pulp
 import streamlit as st
 
 
-def to_str(val, default=""):
+def force_scalar_str(val, default=""):
   if val is None:
     return default
   while isinstance(
@@ -20,7 +20,7 @@ def to_str(val, default=""):
     elif isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
       if len(val) == 0:
         return default
-      val = val[0]
+      val = val[0] if hasattr(val, "__getitem__") else val
   try:
     if pd.isna(val):
       return default
@@ -32,18 +32,18 @@ def to_str(val, default=""):
   return s
 
 
-def to_int(val, default=0):
-  s = to_str(val, None)
-  if s is None:
+def force_scalar_int(val, default=0):
+  sc = force_scalar_str(val, None)
+  if sc is None:
     return default
   try:
-    return int(float(s))
+    return int(float(sc))
   except Exception:
     return default
 
 
 def clean_var_name(s):
-  sc = to_str(s, "X")
+  sc = force_scalar_str(s, "X")
   res = re.sub(r"\W+", "_", sc).strip("_")
   return res if res else "X"
 
@@ -85,8 +85,6 @@ def find_col(df, candidate_names, default_name=""):
     for idx, c in enumerate(cols):
       if name.lower() in c.lower() or c.lower() in name.lower():
         return str(df.columns[idx])
-  if len(df.columns) > 0:
-    return str(df.columns[0])
   return str(default_name)
 
 
@@ -224,13 +222,13 @@ if st.button(
     if not df_beban_raw.empty and col_guru in df_beban_raw.columns:
       last_guru = None
       for _, r in df_beban_raw.iterrows():
-        g_val = to_str(r.get(col_guru))
+        g_val = force_scalar_str(r.get(col_guru))
         if g_val:
           last_guru = g_val
         else:
           g_val = last_guru
-        k_val = to_str(r.get(col_kelas)).upper()
-        jw_val = to_int(r.get(col_jw), 0)
+        k_val = force_scalar_str(r.get(col_kelas)).upper()
+        jw_val = force_scalar_int(r.get(col_jw), 0)
         if g_val and k_val and jw_val > 0:
           g_list.append(g_val)
           k_list.append(k_val)
@@ -257,7 +255,7 @@ if st.button(
     status_dict = {}
     if not df_status_raw.empty and col_status_guru in df_status_raw.columns:
       for _, r in df_status_raw.iterrows():
-        g_key = to_str(r.get(col_status_guru))
+        g_key = force_scalar_str(r.get(col_status_guru))
         if (
             g_key
             and g_key.upper() not in INVALID_TEXTS
@@ -276,8 +274,8 @@ if st.button(
     JAM_HARI = {}
     if not df_config.empty and col_hari in df_config.columns:
       for _, r in df_config.iterrows():
-        h_name = to_str(r.get(col_hari))
-        j_cnt = to_int(r.get(col_jam_count), 6)
+        h_name = force_scalar_str(r.get(col_hari))
+        j_cnt = force_scalar_int(r.get(col_jam_count), 6)
         if h_name:
           HARI.append(h_name)
           JAM_HARI[h_name] = list(range(1, j_cnt + 1))
@@ -293,23 +291,23 @@ if st.button(
     HARI_MGMP_MAPEL = {}
     if not df_mgmp_rule.empty:
       for _, r in df_mgmp_rule.iterrows():
-        m_name = to_str(r.get(col_mgmp_mapel)).upper()
-        h_mgmp = to_str(r.get(col_mgmp_hari))
+        m_name = force_scalar_str(r.get(col_mgmp_mapel)).upper()
+        h_mgmp = force_scalar_str(r.get(col_mgmp_hari))
         if m_name and h_mgmp:
           HARI_MGMP_MAPEL[m_name] = h_mgmp
 
-    GURU = sorted(list(set(to_str(g) for g in df_pair["Guru"])))
-    KELAS = sorted(list(set(to_str(k) for k in df_pair["Kelas"])))
+    GURU = sorted(list(set(force_scalar_str(g) for g in df_pair["Guru"])))
+    KELAS = sorted(list(set(force_scalar_str(k) for k in df_pair["Kelas"])))
     valid_gk_pairs = [
-        (to_str(row["Guru"]), to_str(row["Kelas"]))
+        (force_scalar_str(row["Guru"]), force_scalar_str(row["Kelas"]))
         for _, row in df_pair.iterrows()
-        if to_int(row["Jam_Wajib"]) > 0
+        if force_scalar_int(row["Jam_Wajib"]) > 0
     ]
 
     mgmp_teachers = set()
     for g in GURU:
       st_info = status_dict.get(g, {})
-      val = to_str(st_info.get("Is_MGMP")).upper()
+      val = force_scalar_str(st_info.get("Is_MGMP")).upper()
       if val in ["1", "1.0", "TRUE", "Y", "YES"]:
         mgmp_teachers.add(g)
 
@@ -317,28 +315,37 @@ if st.button(
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
     var_keys = [
-        (to_str(g), to_str(k), to_str(h), to_int(j))
+        (
+            force_scalar_str(g),
+            force_scalar_str(k),
+            force_scalar_str(h),
+            force_scalar_int(j),
+        )
         for (g, k) in valid_gk_pairs
         for h in HARI
-        for j in JAM_HARI.get(to_str(h), [])
+        for j in JAM_HARI.get(force_scalar_str(h), [])
     ]
-    pair_keys = [(to_str(g), to_str(k)) for (g, k) in valid_gk_pairs]
+    pair_keys = [
+        (force_scalar_str(g), force_scalar_str(k)) for (g, k) in valid_gk_pairs
+    ]
     c2_keys = [
-        (to_str(k), to_str(h), to_int(j))
+        (force_scalar_str(k), force_scalar_str(h), force_scalar_int(j))
         for k in KELAS
         for h in HARI
-        for j in JAM_HARI.get(to_str(h), [])
+        for j in JAM_HARI.get(force_scalar_str(h), [])
     ]
-    dh_keys = [(to_str(g), to_str(h)) for g in GURU for h in HARI]
+    dh_keys = [
+        (force_scalar_str(g), force_scalar_str(h)) for g in GURU for h in HARI
+    ]
 
     gap_keys = []
     for g, k in valid_gk_pairs:
-      g_s, k_s = to_str(g), to_str(k)
+      g_s, k_s = force_scalar_str(g), force_scalar_str(k)
       for h in HARI:
-        h_s = to_str(h)
+        h_s = force_scalar_str(h)
         j_list = JAM_HARI.get(h_s, [])
         for idx in range(len(j_list) - 2):
-          gap_keys.append((g_s, k_s, h_s, to_int(j_list[idx])))
+          gap_keys.append((g_s, k_s, h_s, force_scalar_int(j_list[idx])))
 
     # Guaranteed pure string vname
     x = {}
@@ -392,7 +399,7 @@ if st.button(
     # Constraints
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
-      mapel_raw = to_str(st_info.get("Mata_Pelajaran"))
+      mapel_raw = force_scalar_str(st_info.get("Mata_Pelajaran"))
       mapel_list = [
           m.strip().upper() for m in mapel_raw.split(",") if m.strip()
       ]
@@ -402,7 +409,7 @@ if st.button(
           assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
           for k_i in assigned_k:
             for j in JAM_HARI.get(h_mgmp, []):
-              j_i = to_int(j)
+              j_i = force_scalar_int(j)
               if j_i > 2 and (g, k_i, h_mgmp, j_i) in x:
                 model += x[g, k_i, h_mgmp, j_i] == 0
 
@@ -413,7 +420,7 @@ if st.button(
       if assigned_k:
         for h in HARI:
           for j in JAM_HARI.get(h, []):
-            j_i = to_int(j)
+            j_i = force_scalar_int(j)
             if any((g, k_i, h, j_i) in x for k_i in assigned_k):
               model += (
                   pulp.lpSum([
@@ -429,7 +436,7 @@ if st.button(
       if assigned_g:
         for h in HARI:
           for j in JAM_HARI.get(h, []):
-            j_i = to_int(j)
+            j_i = force_scalar_int(j)
             if (k, h, j_i) in d_c2_minus:
               model += (
                   pulp.lpSum([
@@ -443,17 +450,17 @@ if st.button(
 
     for _, row in df_pair.iterrows():
       g, k, jw = (
-          to_str(row["Guru"]),
-          to_str(row["Kelas"]),
-          to_int(row["Jam_Wajib"]),
+          force_scalar_str(row["Guru"]),
+          force_scalar_str(row["Kelas"]),
+          force_scalar_int(row["Jam_Wajib"]),
       )
       if (g, k) in d_pair_minus and (g, k) in d_pair_plus:
         model += (
             pulp.lpSum([
-                x[g, k, h, to_int(j)]
+                x[g, k, h, force_scalar_int(j)]
                 for h in HARI
                 for j in JAM_HARI.get(h, [])
-                if (g, k, h, to_int(j)) in x
+                if (g, k, h, force_scalar_int(j)) in x
             ])
             + d_pair_minus[g, k]
             - d_pair_plus[g, k]
@@ -465,9 +472,9 @@ if st.button(
         j_list = JAM_HARI.get(h, [])
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = (
-              to_int(j_list[idx]),
-              to_int(j_list[idx + 1]),
-              to_int(j_list[idx + 2]),
+              force_scalar_int(j_list[idx]),
+              force_scalar_int(j_list[idx + 1]),
+              force_scalar_int(j_list[idx + 2]),
           )
           if (
               (g, k, h, j1) in x
@@ -485,9 +492,9 @@ if st.button(
 
     for g in GURU:
       st_info = status_dict.get(g, {})
-      is_wali_val = to_str(st_info.get("Is_Wali")).upper()
+      is_wali_val = force_scalar_str(st_info.get("Is_Wali")).upper()
       if is_wali_val in ["1", "1.0", "TRUE", "Y", "YES"]:
-        k_wali = to_str(st_info.get("Kelas_Wali")).upper()
+        k_wali = force_scalar_str(st_info.get("Kelas_Wali")).upper()
         if (
             (g, k_wali) in valid_gk_pairs
             and "Jumat" in HARI
@@ -502,7 +509,7 @@ if st.button(
     wakasek_teachers = [
         g
         for g in GURU
-        if to_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
+        if force_scalar_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
         in ["1", "1.0", "TRUE", "Y", "YES"]
     ]
     if wakasek_teachers:
@@ -518,13 +525,15 @@ if st.button(
         )
 
     for g in GURU:
-      is_pjok_val = to_str(status_dict.get(g, {}).get("Is_PJOK")).upper()
+      is_pjok_val = force_scalar_str(
+          status_dict.get(g, {}).get("Is_PJOK")
+      ).upper()
       if is_pjok_val in ["1", "1.0", "TRUE", "Y", "YES"]:
         assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
         for h in HARI:
           for k_i in assigned_k:
             for j in JAM_HARI.get(h, []):
-              j_i = to_int(j)
+              j_i = force_scalar_int(j)
               if j_i > 4 and (g, k_i, h, j_i) in x:
                 p_c8 = pulp.LpVariable(
                     str(
