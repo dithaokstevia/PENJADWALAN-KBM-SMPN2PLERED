@@ -16,11 +16,11 @@ def force_scalar_str(val, default=""):
     if isinstance(val, pd.DataFrame):
       if val.empty:
         return default
-      val = val.iloc[0, 0]
+      val = val.iloc
     elif isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
       if len(val) == 0:
         return default
-      val = val[0] if hasattr(val, "__getitem__") else val
+      val = val
   try:
     if pd.isna(val):
       return default
@@ -624,3 +624,4 @@ if st.button(
           "❌ Solver tidak menemukan solusi yang valid. Periksa kembali batasan"
           " atau jam wajib."
       )
+📊 Saran:
