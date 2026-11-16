@@ -1,7 +1,6 @@
 import io
 import os
 import re
-import numpy as np
 import pandas as pd
 import pulp
 import streamlit as st
@@ -35,10 +34,10 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Initial DataFrames dengan array default lengkap
+# Initial DataFrames dengan default values yang VALID
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM":,
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -54,7 +53,7 @@ df_status_init = pd.DataFrame({
     "Is_MGMP": ["0", "0"],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [2, 2]}
 )
 
 if excel_path is not None:
@@ -89,19 +88,14 @@ def create_var(name, low_bound=None, up_bound=None, is_binary=False):
   lb = 0 if is_binary else low_bound
   ub = 1 if is_binary else up_bound
 
-  # Attempt 1: Standard keyword arguments
   try:
     return pulp.LpVariable(name, lowBound=lb, upBound=ub, cat=cat_val)
   except Exception:
     pass
-
-  # Attempt 2: Positional arguments
   try:
     return pulp.LpVariable(name, lb, ub, cat_val)
   except Exception:
     pass
-
-  # Attempt 3: Base creation then direct property setting
   v = pulp.LpVariable(name)
   if lb is not None:
     v.lowBound = lb
@@ -247,7 +241,7 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
 
-    # Variable dictionaries built using ultra-safe create_var function
+    # Variable dictionaries
     x = {
         (g, k, h, j): create_var(
             f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
@@ -255,42 +249,36 @@ if st.button(
         )
         for (g, k, h, j) in var_keys
     }
-
     d_pair_minus = {
         (g, k): create_var(
             f"dp_minus_{safe_name(g)}_{safe_name(k)}", low_bound=0
         )
         for (g, k) in pair_keys
     }
-
     d_pair_plus = {
         (g, k): create_var(
             f"dp_plus_{safe_name(g)}_{safe_name(k)}", low_bound=0
         )
         for (g, k) in pair_keys
     }
-
     d_c2_minus = {
         (k, h, j): create_var(
             f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}", low_bound=0
         )
         for (k, h, j) in c2_keys
     }
-
     d_h_plus = {
         (g, h): create_var(
             f"dh_plus_{safe_name(g)}_{safe_name(h)}", low_bound=0
         )
         for (g, h) in dh_keys
     }
-
     d_h_minus = {
         (g, h): create_var(
             f"dh_minus_{safe_name(g)}_{safe_name(h)}", low_bound=0
         )
         for (g, h) in dh_keys
     }
-
     z_gap = {
         (g, k, h, j): create_var(
             f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}", low_bound=0
