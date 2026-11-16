@@ -61,7 +61,17 @@ def sanitize_dataframe(df):
       flat_cols.append("_".join(parts) if parts else "Unassigned")
     df.columns = flat_cols
   df.columns = [str(c).strip() for c in df.columns]
-  df = df.loc[:, ~df.columns.duplicated()].copy()
+
+  new_cols = []
+  col_counts = {}
+  for c in df.columns:
+    if c in col_counts:
+      col_counts[c] += 1
+      new_cols.append(f"{c}_{col_counts[c]}")
+    else:
+      col_counts[c] = 1
+      new_cols.append(c)
+  df.columns = new_cols
   return df
 
 
@@ -77,7 +87,7 @@ def find_col(df, candidate_names, default_name=""):
     for idx, c in enumerate(cols):
       if name.lower() in c.lower() or c.lower() in name.lower():
         return str(df.columns[idx])
-  if len(cols) > 0:
+  if len(df.columns) > 0:
     return str(df.columns[0])
   return str(default_name)
 
@@ -332,7 +342,7 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_prim_int(j_list[idx])))
 
-    # Explicit dictionary comprehensions
+    # Explicit dictionary comprehensions with 100% scalar strings and integers
     x = {}
     for g, k, h, j in var_keys:
       vname = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
