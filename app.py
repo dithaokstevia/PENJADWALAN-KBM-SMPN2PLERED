@@ -35,10 +35,10 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Default Initial DataFrames (Lengkap dengan nilai default)
+# Initial DataFrames dengan array default lengkap
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM":,
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -54,7 +54,7 @@ df_status_init = pd.DataFrame({
     "Is_MGMP": ["0", "0"],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
 )
 
 if excel_path is not None:
@@ -81,6 +81,34 @@ def safe_name(s):
   sc = str(s).strip() if s is not None else "X"
   res = re.sub(r"\W+", "_", sc).strip("_")
   return res if res else "X"
+
+
+def create_var(name, low_bound=None, up_bound=None, is_binary=False):
+  """Universal PuLP variable factory compatible across PuLP 2.x and PuLP 3.x (Rust core)."""
+  cat_val = pulp.LpBinary if is_binary else pulp.LpContinuous
+  lb = 0 if is_binary else low_bound
+  ub = 1 if is_binary else up_bound
+
+  # Attempt 1: Standard keyword arguments
+  try:
+    return pulp.LpVariable(name, lowBound=lb, upBound=ub, cat=cat_val)
+  except Exception:
+    pass
+
+  # Attempt 2: Positional arguments
+  try:
+    return pulp.LpVariable(name, lb, ub, cat_val)
+  except Exception:
+    pass
+
+  # Attempt 3: Base creation then direct property setting
+  v = pulp.LpVariable(name)
+  if lb is not None:
+    v.lowBound = lb
+  if ub is not None:
+    v.upBound = ub
+  v.cat = cat_val
+  return v
 
 
 st.header("⚙️ Editor Parameter & Input Semester")
@@ -219,55 +247,53 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
 
-    # Pembuatan Variabel PuLP (Sintaks Posisional Universal untuk PuLP 2.x & PuLP 3.x)
+    # Variable dictionaries built using ultra-safe create_var function
     x = {
-        (g, k, h, j): pulp.LpVariable(
+        (g, k, h, j): create_var(
             f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
-            0,
-            1,
-            pulp.LpBinary,
+            is_binary=True,
         )
         for (g, k, h, j) in var_keys
     }
+
     d_pair_minus = {
-        (g, k): pulp.LpVariable(
-            f"dp_minus_{safe_name(g)}_{safe_name(k)}", 0, None, pulp.LpContinuous
+        (g, k): create_var(
+            f"dp_minus_{safe_name(g)}_{safe_name(k)}", low_bound=0
         )
         for (g, k) in pair_keys
     }
+
     d_pair_plus = {
-        (g, k): pulp.LpVariable(
-            f"dp_plus_{safe_name(g)}_{safe_name(k)}", 0, None, pulp.LpContinuous
+        (g, k): create_var(
+            f"dp_plus_{safe_name(g)}_{safe_name(k)}", low_bound=0
         )
         for (g, k) in pair_keys
     }
+
     d_c2_minus = {
-        (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}",
-            0,
-            None,
-            pulp.LpContinuous,
+        (k, h, j): create_var(
+            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}", low_bound=0
         )
         for (k, h, j) in c2_keys
     }
+
     d_h_plus = {
-        (g, h): pulp.LpVariable(
-            f"dh_plus_{safe_name(g)}_{safe_name(h)}", 0, None, pulp.LpContinuous
+        (g, h): create_var(
+            f"dh_plus_{safe_name(g)}_{safe_name(h)}", low_bound=0
         )
         for (g, h) in dh_keys
     }
+
     d_h_minus = {
-        (g, h): pulp.LpVariable(
-            f"dh_minus_{safe_name(g)}_{safe_name(h)}", 0, None, pulp.LpContinuous
+        (g, h): create_var(
+            f"dh_minus_{safe_name(g)}_{safe_name(h)}", low_bound=0
         )
         for (g, h) in dh_keys
     }
+
     z_gap = {
-        (g, k, h, j): pulp.LpVariable(
-            f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
-            0,
-            None,
-            pulp.LpContinuous,
+        (g, k, h, j): create_var(
+            f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}", low_bound=0
         )
         for (g, k, h, j) in gap_keys
     }
@@ -343,9 +369,7 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(
-                f"penalti_wali_{safe_name(g)}", 0, None, pulp.LpContinuous
-            )
+            p_c6 = create_var(f"penalti_wali_{safe_name(g)}", low_bound=0)
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -382,11 +406,9 @@ if st.button(
           for k in assigned_k:
             for j in JAM_HARI[h]:
               if j > 4:
-                p_c8 = pulp.LpVariable(
+                p_c8 = create_var(
                     f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
-                    0,
-                    None,
-                    pulp.LpContinuous,
+                    low_bound=0,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
