@@ -352,10 +352,10 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables using dict comprehensions with explicit kwargs
+    # Create Decision Variables
     x = {
         (sg, sk, sh, sj): pulp.LpVariable(
-            name=f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
+            f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
             lowBound=0,
             upBound=1,
             cat=pulp.LpBinary,
@@ -365,7 +365,7 @@ if st.button(
 
     d_pair_minus = {
         (sg, sk): pulp.LpVariable(
-            name=f"dp_minus_{safe_name(sg)}_{safe_name(sk)}",
+            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -374,7 +374,7 @@ if st.button(
 
     d_pair_plus = {
         (sg, sk): pulp.LpVariable(
-            name=f"dp_plus_{safe_name(sg)}_{safe_name(sk)}",
+            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -383,7 +383,7 @@ if st.button(
 
     d_c2_minus = {
         (sk, sh, sj): pulp.LpVariable(
-            name=f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}",
+            f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -392,7 +392,7 @@ if st.button(
 
     d_h_plus = {
         (sg, sh): pulp.LpVariable(
-            name=f"dh_plus_{safe_name(sg)}_{safe_name(sh)}",
+            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -401,7 +401,7 @@ if st.button(
 
     d_h_minus = {
         (sg, sh): pulp.LpVariable(
-            name=f"dh_minus_{safe_name(sg)}_{safe_name(sh)}",
+            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -410,7 +410,7 @@ if st.button(
 
     z_gap = {
         (sg, sk, sh, sj): pulp.LpVariable(
-            name=f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
+            f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
             lowBound=0,
             cat=pulp.LpContinuous,
         )
@@ -530,7 +530,7 @@ if st.button(
             and (sg, k_wali, "Jumat", 1) in x
         ):
           p_c6 = pulp.LpVariable(
-              name=f"penalti_wali_{safe_name(sg)}",
+              f"penalti_wali_{safe_name(sg)}",
               lowBound=0,
               cat=pulp.LpContinuous,
           )
@@ -568,7 +568,7 @@ if st.button(
               j_i = int(j)
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
                 p_c8 = pulp.LpVariable(
-                    name=f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
+                    f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
                     lowBound=0,
                     cat=pulp.LpContinuous,
                 )
