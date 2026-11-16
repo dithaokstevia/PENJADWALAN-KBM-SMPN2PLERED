@@ -342,48 +342,13 @@ if st.button(
           gap_keys.append((sg, sk, sh, to_int(j_list[idx])))
 
     # Decision Variables
-    x = {}
-    for g, k, h, j in var_keys:
-      vname = f"x_{safe_var_name(g)}_{safe_var_name(k)}_{safe_var_name(h)}_{j}"
-      x[(g, k, h, j)] = pulp.LpVariable(vname, cat=pulp.LpBinary)
-
-    d_pair_minus = {
-        (g, k): pulp.LpVariable(
-            f"dp_minus_{safe_var_name(g)}_{safe_var_name(k)}", lowBound=0
-        )
-        for (g, k) in pair_keys
-    }
-    d_pair_plus = {
-        (g, k): pulp.LpVariable(
-            f"dp_plus_{safe_var_name(g)}_{safe_var_name(k)}", lowBound=0
-        )
-        for (g, k) in pair_keys
-    }
-    d_c2_minus = {
-        (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{safe_var_name(k)}_{safe_var_name(h)}_{j}", lowBound=0
-        )
-        for (k, h, j) in c2_keys
-    }
-    d_h_plus = {
-        (g, h): pulp.LpVariable(
-            f"dh_plus_{safe_var_name(g)}_{safe_var_name(h)}", lowBound=0
-        )
-        for (g, h) in dh_keys
-    }
-    d_h_minus = {
-        (g, h): pulp.LpVariable(
-            f"dh_minus_{safe_var_name(g)}_{safe_var_name(h)}", lowBound=0
-        )
-        for (g, h) in dh_keys
-    }
-    z_gap = {
-        (g, k, h, j): pulp.LpVariable(
-            f"zgap_{safe_var_name(g)}_{safe_var_name(k)}_{safe_var_name(h)}_{j}",
-            lowBound=0,
-        )
-        for (g, k, h, j) in gap_keys
-    }
+    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
+    d_pair_minus = pulp.LpVariable.dicts("dpair_minus", pair_keys, lowBound=0)
+    d_pair_plus = pulp.LpVariable.dicts("dpair_plus", pair_keys, lowBound=0)
+    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
+    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
+    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
+    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
 
     # Constraints
     for g in mgmp_teachers:
