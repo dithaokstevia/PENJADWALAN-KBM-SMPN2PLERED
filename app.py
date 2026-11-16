@@ -1,13 +1,3 @@
-{
-  "result":  "exit_code: 0\nstdout:\n\nstderr:\nOpenBLAS WARNING - could not determine the L2 cache size on this system, assuming 256k\n2026-11-16 08:38:00.672 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.672 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.835 \n  \u001b[33m\u001b[1mWarning:\u001b[0m to view this Streamlit app on a browser, run it with the following\n  command:\n\n    streamlit run /workspace/scratch/app.py [ARGUMENTS]\n2026-11-16 08:38:00.835 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.835 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-11-16 08:38:00.836 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.\n2026-1Sepertinya pesan error terbaru yang ingin Anda kirimkan masih berupa teks placeholder (`{ini erornya}`). 
-
-Namun, jika Anda memerlukan **kode utuh `app.py`** yang sudah diperbaiki total dari seluruh isu PuLP (termasuk penghapusan `LpVariable.dicts` dan perbaikan *positional arguments* pada Python 3.14 / PuLP 3.x), berikut adalah kode yang siap Anda salin ke GitHub:
-
----
-
-### 📋 **Kode Utuh `app.py` (Stabil & Teruji)**
-
-```python
 import io
 import os
 import re
