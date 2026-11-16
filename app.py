@@ -35,45 +35,46 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-if excel_path is None:
-  st.warning(
-      "⚠️ Silakan unggah file Excel `data_jadwal.xlsx` atau `data_jadwal(1).xlsx`"
-      " di sidebar untuk memulai."
-  )
-  st.stop()
+# Default Initial DataFrames (Lengkap dengan nilai default)
+df_config_init = pd.DataFrame({
+    "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+})
+df_mgmp_init = pd.DataFrame({
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
+    "Hari_MGMP": ["Kamis", "Rabu"],
+})
+df_status_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B"],
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
+    "Is_Wali": ["0", "0"],
+    "Kelas_Wali": ["", ""],
+    "Is_Wakasek": ["0", "0"],
+    "Is_PJOK": ["0", "0"],
+    "Is_MGMP": ["0", "0"],
+})
+df_beban_init = pd.DataFrame(
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
+)
 
-# Load sheets
-try:
-  xls = pd.ExcelFile(excel_path)
-  df_config_init = (
-      pd.read_excel(xls, sheet_name="Config_Sekolah")
-      if "Config_Sekolah" in xls.sheet_names
-      else pd.DataFrame({
-          "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM":,
-      })
-  )
-  df_mgmp_init = (
-      pd.read_excel(xls, sheet_name="Aturan_MGMP")
-      if "Aturan_MGMP" in xls.sheet_names
-      else pd.DataFrame({
-          "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-          "Hari_MGMP": ["Kamis", "Rabu"],
-      })
-  )
-  df_status_init = (
-      pd.read_excel(xls, sheet_name="Status_Guru")
-      if "Status_Guru" in xls.sheet_names
-      else pd.DataFrame()
-  )
-  df_beban_init = (
-      pd.read_excel(xls, sheet_name="Guru_Kelas")
-      if "Guru_Kelas" in xls.sheet_names
-      else pd.DataFrame()
-  )
-except Exception as e:
-  st.error(f"Gagal membaca file Excel: {e}")
-  st.stop()
+if excel_path is not None:
+  try:
+    xls = pd.ExcelFile(excel_path)
+    sheet_lower = {str(s).lower().strip(): str(s) for s in xls.sheet_names}
+    if "config_sekolah" in sheet_lower:
+      df_config_init = pd.read_excel(
+          xls, sheet_name=sheet_lower["config_sekolah"]
+      )
+    if "aturan_mgmp" in sheet_lower:
+      df_mgmp_init = pd.read_excel(xls, sheet_name=sheet_lower["aturan_mgmp"])
+    if "status_guru" in sheet_lower:
+      df_status_init = pd.read_excel(
+          xls, sheet_name=sheet_lower["status_guru"]
+      )
+    if "guru_kelas" in sheet_lower:
+      df_beban_init = pd.read_excel(xls, sheet_name=sheet_lower["guru_kelas"])
+  except Exception as e:
+    st.error(f"Gagal membaca file Excel: {e}")
 
 
 def safe_name(s):
@@ -218,7 +219,7 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
 
-    # Create decision variables using explicit dictionary comprehension
+    # Pembuatan Variabel PuLP (Sintaks Posisional Universal untuk PuLP 2.x & PuLP 3.x)
     x = {
         (g, k, h, j): pulp.LpVariable(
             f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
@@ -228,21 +229,18 @@ if st.button(
         )
         for (g, k, h, j) in var_keys
     }
-
     d_pair_minus = {
         (g, k): pulp.LpVariable(
             f"dp_minus_{safe_name(g)}_{safe_name(k)}", 0, None, pulp.LpContinuous
         )
         for (g, k) in pair_keys
     }
-
     d_pair_plus = {
         (g, k): pulp.LpVariable(
             f"dp_plus_{safe_name(g)}_{safe_name(k)}", 0, None, pulp.LpContinuous
         )
         for (g, k) in pair_keys
     }
-
     d_c2_minus = {
         (k, h, j): pulp.LpVariable(
             f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}",
@@ -252,21 +250,18 @@ if st.button(
         )
         for (k, h, j) in c2_keys
     }
-
     d_h_plus = {
         (g, h): pulp.LpVariable(
             f"dh_plus_{safe_name(g)}_{safe_name(h)}", 0, None, pulp.LpContinuous
         )
         for (g, h) in dh_keys
     }
-
     d_h_minus = {
         (g, h): pulp.LpVariable(
             f"dh_minus_{safe_name(g)}_{safe_name(h)}", 0, None, pulp.LpContinuous
         )
         for (g, h) in dh_keys
     }
-
     z_gap = {
         (g, k, h, j): pulp.LpVariable(
             f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
