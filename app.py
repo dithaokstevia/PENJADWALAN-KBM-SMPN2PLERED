@@ -6,89 +6,78 @@ import pandas as pd
 import pulp
 import streamlit as st
 
+st.set_page_config(
+    page_title="Simulator Penjadwalan KBM SMPN 2 Plered",
+    page_icon="🏫",
+    layout="wide",
+)
 
-def create_pulp_variable(
-    name: str, low_bound=None, up_bound=None, cat=pulp.LpContinuous
-):
-  """Universal PuLP variable factory function.
+st.title("🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered")
+st.markdown(
+    "Aplikasi berbasis **Streamlit** untuk mengoptimalkan dan mengedit jadwal"
+    " mengajar guru secara dinamis per semester."
+)
 
-  Guarantees compatibility with PuLP 3.x (PyO3 _rustcore backend on Python 3.14)
-  and PuLP 2.x standard backend.
-  """
-  cat_str = "Continuous"
-  if cat == pulp.LpBinary or str(cat).lower() in [
-      "binary",
-      "bin",
-      "b",
-      "1",
-      "lpbinary",
+# Sidebar for file upload
+st.sidebar.header("📂 Sumber Data Excel")
+uploaded_file = st.sidebar.file_uploader(
+    "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
+)
+
+# Default Initial DataFrames
+df_config_init = pd.DataFrame({
+    "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+})
+df_mgmp_init = pd.DataFrame({
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
+    "Hari_MGMP": ["Kamis", "Rabu"],
+})
+df_status_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B"],
+    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
+    "Is_Wali": ["0", "0"],
+    "Kelas_Wali": ["", ""],
+    "Is_Wakasek": ["0", "0"],
+    "Is_PJOK": ["0", "0"],
+    "Is_MGMP": ["0", "0"],
+})
+df_beban_init = pd.DataFrame(
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [24, 24]}
+)
+
+excel_path = None
+if uploaded_file is not None:
+  excel_path = uploaded_file
+else:
+  for possible_name in [
+      "data_jadwal(1).xlsx",
+      "data_jadwal.xlsx",
+      "data_jadwal(2).xlsx",
   ]:
-    cat_str = "Binary"
-    if low_bound is None:
-      low_bound = 0.0
-    if up_bound is None:
-      up_bound = 1.0
-  elif cat == pulp.LpInteger or str(cat).lower() in [
-      "integer",
-      "int",
-      "i",
-      "lpinteger",
-  ]:
-    cat_str = "Integer"
+    if os.path.exists(possible_name):
+      excel_path = possible_name
+      break
 
-  lb = float(low_bound) if low_bound is not None else None
-  ub = float(up_bound) if up_bound is not None else None
+if excel_path is not None:
+  try:
+    xls = pd.ExcelFile(excel_path)
+    sheet_lower = {str(s).lower().strip(): str(s) for s in xls.sheet_names}
 
-  # Check if PuLP 3.x Rust core is present
-  rustcore = None
-  for mod_name in ["pulp.core._rustcore", "pulp._rustcore", "_rustcore"]:
-    try:
-      mod = __import__(mod_name, fromlist=["Variable"])
-      if hasattr(mod, "Variable"):
-        rustcore = mod
-        break
-    except ImportError:
-      pass
-
-  if rustcore is not None and hasattr(rustcore, "Variable"):
-    for try_create in [
-        lambda: rustcore.Variable(name, cat_str, lb, ub),
-        lambda: rustcore.Variable(name, cat=cat_str, low_bound=lb, up_bound=ub),
-        lambda: rustcore.Variable(name, cat_str),
-        lambda: rustcore.Variable(name),
-    ]:
-      try:
-        r_var = try_create()
-        if r_var is not None and type(r_var).__name__ == "Variable":
-          try:
-            return pulp.LpVariable(r_var)
-          except Exception:
-            pass
-          v = pulp.LpVariable.__new__(pulp.LpVariable)
-          v._var = r_var
-          v.name = name
-          v.cat = cat_str
-          v.lowBound = lb
-          v.upBound = ub
-          return v
-      except Exception:
-        pass
-
-  # PuLP 2.x standard fallback
-  for try_pulp in [
-      lambda: pulp.LpVariable(name, lowBound=lb, upBound=ub, cat=cat),
-      lambda: pulp.LpVariable(name, low_bound=lb, up_bound=ub, cat=cat),
-      lambda: pulp.LpVariable(name, cat=cat),
-      lambda: pulp.LpVariable(name),
-  ]:
-    try:
-      v = try_pulp()
-      if v is not None:
-        return v
-    except Exception:
-      pass
-
-  return pulp.LpVariable(name)
+    if "config_sekolah" in sheet_lower:
+      df_config_init = pd.read_excel(
+          xls, sheet_name=sheet_lower["config_sekolah"]
+      )
+    if "aturan_mgmp" in sheet_lower:
+      df_mgmp_init = pd.read_excel(xls, sheet_name=sheet_lower["aturan_mgmp"])
+    if "status_guru" in sheet_lower:
+      df_status_init = pd.read_excel(
+          xls, sheet_name=sheet_lower["status_guru"]
+      )
+    if "guru_kelas" in sheet_lower:
+      df_beban_init = pd.read_excel(xls, sheet_name=sheet_lower["guru_kelas"])
+  except Exception as e:
+    st.error(f"Gagal membaca file Excel: {e}")
 
 
 def force_str(val, default=""):
@@ -167,79 +156,6 @@ def find_col(df, candidate_names, default=""):
         return str(c)
   return str(default)
 
-
-st.set_page_config(
-    page_title="Simulator Penjadwalan KBM SMPN 2 Plered",
-    page_icon="🏫",
-    layout="wide",
-)
-
-st.title("🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered")
-st.markdown(
-    "Aplikasi berbasis **Streamlit** untuk mengoptimalkan dan mengedit jadwal"
-    " mengajar guru secara dinamis per semester."
-)
-
-# Sidebar for file upload
-st.sidebar.header("📂 Sumber Data Excel")
-uploaded_file = st.sidebar.file_uploader(
-    "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
-)
-
-# Default Initial DataFrames
-df_config_init = pd.DataFrame({
-    "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
-})
-df_mgmp_init = pd.DataFrame({
-    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Hari_MGMP": ["Kamis", "Rabu"],
-})
-df_status_init = pd.DataFrame({
-    "Guru": ["Guru A", "Guru B"],
-    "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Is_Wali": ["0", "0"],
-    "Kelas_Wali": ["", ""],
-    "Is_Wakasek": ["0", "0"],
-    "Is_PJOK": ["0", "0"],
-    "Is_MGMP": ["0", "0"],
-})
-df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
-)
-
-excel_path = None
-if uploaded_file is not None:
-  excel_path = uploaded_file
-else:
-  for possible_name in [
-      "data_jadwal(1).xlsx",
-      "data_jadwal.xlsx",
-      "data_jadwal(2).xlsx",
-  ]:
-    if os.path.exists(possible_name):
-      excel_path = possible_name
-      break
-
-if excel_path is not None:
-  try:
-    xls = pd.ExcelFile(excel_path)
-    sheet_lower = {str(s).lower().strip(): str(s) for s in xls.sheet_names}
-
-    if "config_sekolah" in sheet_lower:
-      df_config_init = pd.read_excel(
-          xls, sheet_name=sheet_lower["config_sekolah"]
-      )
-    if "aturan_mgmp" in sheet_lower:
-      df_mgmp_init = pd.read_excel(xls, sheet_name=sheet_lower["aturan_mgmp"])
-    if "status_guru" in sheet_lower:
-      df_status_init = pd.read_excel(
-          xls, sheet_name=sheet_lower["status_guru"]
-      )
-    if "guru_kelas" in sheet_lower:
-      df_beban_init = pd.read_excel(xls, sheet_name=sheet_lower["guru_kelas"])
-  except Exception as e:
-    st.error(f"Gagal membaca file Excel: {e}")
 
 st.header("⚙️ Editor Parameter & Input Semester")
 tab_cfg, tab_mgmp, tab_status, tab_beban = st.tabs([
@@ -429,67 +345,54 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables using create_pulp_variable
+    # Standard decision variables
     x = {
-        (sg, sk, sh, sj): create_pulp_variable(
+        (sg, sk, sh, sj): pulp.LpVariable(
             f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            low_bound=0.0,
-            up_bound=1.0,
             cat=pulp.LpBinary,
         )
         for (sg, sk, sh, sj) in var_keys
     }
 
     d_pair_minus = {
-        (sg, sk): create_pulp_variable(
-            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}",
-            low_bound=0.0,
-            cat=pulp.LpContinuous,
+        (sg, sk): pulp.LpVariable(
+            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}", lowBound=0
         )
         for (sg, sk) in pair_keys
     }
 
     d_pair_plus = {
-        (sg, sk): create_pulp_variable(
-            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}",
-            low_bound=0.0,
-            cat=pulp.LpContinuous,
+        (sg, sk): pulp.LpVariable(
+            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}", lowBound=0
         )
         for (sg, sk) in pair_keys
     }
 
     d_c2_minus = {
-        (sk, sh, sj): create_pulp_variable(
-            f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            low_bound=0.0,
-            cat=pulp.LpContinuous,
+        (sk, sh, sj): pulp.LpVariable(
+            f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}", lowBound=0
         )
         for (sk, sh, sj) in c2_keys
     }
 
     d_h_plus = {
-        (sg, sh): create_pulp_variable(
-            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}",
-            low_bound=0.0,
-            cat=pulp.LpContinuous,
+        (sg, sh): pulp.LpVariable(
+            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}", lowBound=0
         )
         for (sg, sh) in dh_keys
     }
 
     d_h_minus = {
-        (sg, sh): create_pulp_variable(
-            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}",
-            low_bound=0.0,
-            cat=pulp.LpContinuous,
+        (sg, sh): pulp.LpVariable(
+            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}", lowBound=0
         )
         for (sg, sh) in dh_keys
     }
 
     z_gap = {
-        (sg, sk, sh, sj): create_pulp_variable(
+        (sg, sk, sh, sj): pulp.LpVariable(
             f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            low_bound=0.0,
-            cat=pulp.LpContinuous,
+            lowBound=0,
         )
         for (sg, sk, sh, sj) in gap_keys
     }
@@ -606,11 +509,7 @@ if st.button(
             and "Jumat" in HARI
             and (sg, k_wali, "Jumat", 1) in x
         ):
-          p_c6 = create_pulp_variable(
-              f"penalti_wali_{safe_name(sg)}",
-              low_bound=0.0,
-              cat=pulp.LpContinuous,
-          )
+          p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(sg)}", lowBound=0)
           penalti_list.append(p_c6)
           model += x[(sg, k_wali, "Jumat", 1)] + p_c6 >= 1
 
@@ -644,10 +543,9 @@ if st.button(
             for j in JAM_HARI.get(sh, []):
               j_i = int(j)
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
-                p_c8 = create_pulp_variable(
+                p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
-                    low_bound=0.0,
-                    cat=pulp.LpContinuous,
+                    lowBound=0,
                 )
                 penalti_list.append(p_c8)
                 model += x[(sg, sk_i, sh, j_i)] - p_c8 <= 0
