@@ -136,15 +136,17 @@ df_mgmp_init = pd.DataFrame({
 df_status_init = pd.DataFrame({
     "Guru": ["Guru A", "Guru B"],
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Is_Wali": [0, 0],
+    "Is_Wali": ["0", "0"],
     "Kelas_Wali": ["", ""],
-    "Is_Wakasek": [0, 0],
-    "Is_PJOK": [0, 0],
-    "Is_MGMP": [1, 1],
+    "Is_Wakasek": ["0", "0"],
+    "Is_PJOK": ["0", "0"],
+    "Is_MGMP": ["0", "0"],
 })
-df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
-)
+df_beban_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B"],
+    "Kelas": ["7A", "7B"],
+    "Jam_Wajib": [4, 4],
+})
 
 if excel_path is not None:
   try:
@@ -364,7 +366,7 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, force_int(j_list[idx])))
 
-    # Create Decision Variables explicitly with pure python dicts
+    # Create Decision Variables explicitly with plain Python dicts
     x = {}
     for g, k, h, j in var_keys:
       vname = f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}"
