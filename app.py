@@ -1,5 +1,7 @@
 import io
 import os
+import re
+import numpy as np
 import pandas as pd
 import pulp
 import streamlit as st
@@ -48,7 +50,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+          "Jumlah_Jam_KBM":,
       })
   )
   df_mgmp_init = (
@@ -72,6 +74,13 @@ try:
 except Exception as e:
   st.error(f"Gagal membaca file Excel: {e}")
   st.stop()
+
+
+def safe_name(s):
+  sc = str(s).strip() if s is not None else "X"
+  res = re.sub(r"\W+", "_", sc).strip("_")
+  return res if res else "X"
+
 
 st.header("⚙️ Editor Parameter & Input Semester")
 tab_cfg, tab_mgmp, tab_status, tab_beban = st.tabs([
@@ -198,18 +207,9 @@ if st.button(
         for h in HARI
         for j in JAM_HARI[h]
     ]
-    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
-
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = pulp.LpVariable.dicts("dpair_minus", pair_keys, lowBound=0)
-    d_pair_plus = pulp.LpVariable.dicts("dpair_plus", pair_keys, lowBound=0)
-
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
-
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
-    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
 
     gap_keys = []
     for g, k in valid_gk_pairs:
@@ -217,7 +217,65 @@ if st.button(
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
+
+    # Create decision variables using explicit dictionary comprehension
+    x = {
+        (g, k, h, j): pulp.LpVariable(
+            f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
+            0,
+            1,
+            pulp.LpBinary,
+        )
+        for (g, k, h, j) in var_keys
+    }
+
+    d_pair_minus = {
+        (g, k): pulp.LpVariable(
+            f"dp_minus_{safe_name(g)}_{safe_name(k)}", 0, None, pulp.LpContinuous
+        )
+        for (g, k) in pair_keys
+    }
+
+    d_pair_plus = {
+        (g, k): pulp.LpVariable(
+            f"dp_plus_{safe_name(g)}_{safe_name(k)}", 0, None, pulp.LpContinuous
+        )
+        for (g, k) in pair_keys
+    }
+
+    d_c2_minus = {
+        (k, h, j): pulp.LpVariable(
+            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}",
+            0,
+            None,
+            pulp.LpContinuous,
+        )
+        for (k, h, j) in c2_keys
+    }
+
+    d_h_plus = {
+        (g, h): pulp.LpVariable(
+            f"dh_plus_{safe_name(g)}_{safe_name(h)}", 0, None, pulp.LpContinuous
+        )
+        for (g, h) in dh_keys
+    }
+
+    d_h_minus = {
+        (g, h): pulp.LpVariable(
+            f"dh_minus_{safe_name(g)}_{safe_name(h)}", 0, None, pulp.LpContinuous
+        )
+        for (g, h) in dh_keys
+    }
+
+    z_gap = {
+        (g, k, h, j): pulp.LpVariable(
+            f"zgap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
+            0,
+            None,
+            pulp.LpContinuous,
+        )
+        for (g, k, h, j) in gap_keys
+    }
 
     # Constraints
     for g in mgmp_teachers:
@@ -290,7 +348,9 @@ if st.button(
         if pd.notna(st_info.get("Kelas_Wali")):
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(f"penalti_wali_{g}", lowBound=0)
+            p_c6 = pulp.LpVariable(
+                f"penalti_wali_{safe_name(g)}", 0, None, pulp.LpContinuous
+            )
             penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
@@ -328,7 +388,10 @@ if st.button(
             for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{g}_{h}_{k}_{j}", lowBound=0
+                    f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
+                    0,
+                    None,
+                    pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
@@ -390,7 +453,6 @@ if st.button(
         st.subheader("Tabel Detail Penugasan")
         st.dataframe(df_hasil, use_container_width=True)
 
-      # Download Option
       output = io.BytesIO()
       with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_hasil.to_excel(writer, sheet_name="Data_Penugasan", index=False)
