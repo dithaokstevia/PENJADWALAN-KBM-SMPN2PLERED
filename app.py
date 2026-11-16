@@ -20,7 +20,7 @@ def force_str(val, default=""):
     for item in vals:
       s = force_str(item, default="")
       if s:
-        return s
+        return str(s)
     return default
   try:
     if pd.isna(val):
@@ -118,7 +118,7 @@ else:
 # Default Initial DataFrames
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM":,
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -134,7 +134,7 @@ df_status_init = pd.DataFrame({
     "Is_MGMP": ["0", "0"],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
 )
 
 if excel_path is not None:
@@ -305,14 +305,14 @@ if st.button(
         "Jam_Wajib"
     ].sum()
 
-    GURU = sorted(list(set(force_str(g) for g in df_pair["Guru"])))
-    KELAS = sorted(list(set(force_str(k) for k in df_pair["Kelas"])))
+    GURU = sorted(list(set(str(force_str(g)) for g in df_pair["Guru"])))
+    KELAS = sorted(list(set(str(force_str(k)) for k in df_pair["Kelas"])))
 
     valid_gk_pairs = []
     for _, row in df_pair.iterrows():
-      g_i = force_str(row["Guru"])
-      k_i = force_str(row["Kelas"])
-      jw_i = force_int(row["Jam_Wajib"])
+      g_i = str(force_str(row["Guru"]))
+      k_i = str(force_str(row["Kelas"]))
+      jw_i = int(force_int(row["Jam_Wajib"]))
       if g_i and k_i and jw_i > 0:
         valid_gk_pairs.append((g_i, k_i))
 
@@ -320,91 +320,88 @@ if st.button(
 
     mgmp_teachers = set()
     for g in GURU:
-      st_info = status_dict.get(g, {})
+      st_info = status_dict.get(str(g), {})
       val = force_str(st_info.get("Is_MGMP")).upper()
       if val in ["1", "1.0", "TRUE", "Y", "YES"]:
-        mgmp_teachers.add(g)
+        mgmp_teachers.add(str(g))
 
     # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
     var_keys = []
     for g, k in valid_gk_pairs:
-      sg, sk = force_str(g), force_str(k)
+      sg, sk = str(g), str(k)
       for h in HARI:
-        sh = force_str(h)
+        sh = str(h)
         for j in JAM_HARI.get(sh, []):
-          sj = force_int(j)
+          sj = int(j)
           var_keys.append((sg, sk, sh, sj))
 
-    pair_keys = [(force_str(g), force_str(k)) for (g, k) in valid_gk_pairs]
+    pair_keys = [(str(g), str(k)) for (g, k) in valid_gk_pairs]
     c2_keys = [
-        (force_str(k), force_str(h), force_int(j))
+        (str(k), str(h), int(j))
         for k in KELAS
         for h in HARI
-        for j in JAM_HARI.get(force_str(h), [])
+        for j in JAM_HARI.get(str(h), [])
     ]
-    dh_keys = [(force_str(g), force_str(h)) for g in GURU for h in HARI]
+    dh_keys = [(str(g), str(h)) for g in GURU for h in HARI]
 
     gap_keys = []
     for g, k in valid_gk_pairs:
-      sg, sk = force_str(g), force_str(k)
+      sg, sk = str(g), str(k)
       for h in HARI:
-        sh = force_str(h)
+        sh = str(h)
         j_list = JAM_HARI.get(sh, [])
         for idx in range(len(j_list) - 2):
-          gap_keys.append((sg, sk, sh, force_int(j_list[idx])))
+          gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables explicitly with plain Python dicts
-    x = {
-        key: pulp.LpVariable(
-            f"x_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}_{key[3]}",
-            cat=pulp.LpBinary,
-        )
-        for key in var_keys
-    }
-    d_pair_minus = {
-        key: pulp.LpVariable(
-            f"dp_minus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
-        )
-        for key in pair_keys
-    }
-    d_pair_plus = {
-        key: pulp.LpVariable(
-            f"dp_plus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
-        )
-        for key in pair_keys
-    }
-    d_c2_minus = {
-        key: pulp.LpVariable(
-            f"dc2_minus_{safe_name(key[0])}_{safe_name(key[1])}_{key[2]}",
-            lowBound=0,
-        )
-        for key in c2_keys
-    }
-    d_h_plus = {
-        key: pulp.LpVariable(
-            f"dh_plus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
-        )
-        for key in dh_keys
-    }
-    d_h_minus = {
-        key: pulp.LpVariable(
-            f"dh_minus_{safe_name(key[0])}_{safe_name(key[1])}", lowBound=0
-        )
-        for key in dh_keys
-    }
-    z_gap = {
-        key: pulp.LpVariable(
-            f"zgap_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}_{key[3]}",
-            lowBound=0,
-        )
-        for key in gap_keys
-    }
+    # Create Decision Variables explicitly with python loop
+    x = {}
+    for g, k, h, j in var_keys:
+      sg, sk, sh, sj = str(g), str(k), str(h), int(j)
+      vname = f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}"
+      x[(sg, sk, sh, sj)] = pulp.LpVariable(vname, cat=pulp.LpBinary)
+
+    d_pair_minus = {}
+    d_pair_plus = {}
+    for g, k in pair_keys:
+      sg, sk = str(g), str(k)
+      d_pair_minus[(sg, sk)] = pulp.LpVariable(
+          f"dp_minus_{safe_name(sg)}_{safe_name(sk)}", lowBound=0
+      )
+      d_pair_plus[(sg, sk)] = pulp.LpVariable(
+          f"dp_plus_{safe_name(sg)}_{safe_name(sk)}", lowBound=0
+      )
+
+    d_c2_minus = {}
+    for k, h, j in c2_keys:
+      sk, sh, sj = str(k), str(h), int(j)
+      d_c2_minus[(sk, sh, sj)] = pulp.LpVariable(
+          f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}", lowBound=0
+      )
+
+    d_h_plus = {}
+    d_h_minus = {}
+    for g, h in dh_keys:
+      sg, sh = str(g), str(h)
+      d_h_plus[(sg, sh)] = pulp.LpVariable(
+          f"dh_plus_{safe_name(sg)}_{safe_name(sh)}", lowBound=0
+      )
+      d_h_minus[(sg, sh)] = pulp.LpVariable(
+          f"dh_minus_{safe_name(sg)}_{safe_name(sh)}", lowBound=0
+      )
+
+    z_gap = {}
+    for g, k, h, j in gap_keys:
+      sg, sk, sh, sj = str(g), str(k), str(h), int(j)
+      z_gap[(sg, sk, sh, sj)] = pulp.LpVariable(
+          f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}", lowBound=0
+      )
 
     # Constraints
     for g in mgmp_teachers:
-      st_info = status_dict.get(g, {})
+      sg = str(g)
+      st_info = status_dict.get(sg, {})
       mapel_raw = force_str(st_info.get("Mata_Pelajaran"))
       mapel_list = [
           m.strip().upper() for m in mapel_raw.split(",") if m.strip()
@@ -412,150 +409,155 @@ if st.button(
       for m_name in mapel_list:
         h_mgmp = HARI_MGMP_MAPEL.get(m_name)
         if h_mgmp and h_mgmp in HARI:
-          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+          sh_mgmp = str(h_mgmp)
+          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == sg]
           for k_i in assigned_k:
-            for j in JAM_HARI.get(h_mgmp, []):
-              j_i = force_int(j)
-              if j_i > 2 and (g, k_i, h_mgmp, j_i) in x:
-                model += x[g, k_i, h_mgmp, j_i] == 0
+            sk_i = str(k_i)
+            for j in JAM_HARI.get(sh_mgmp, []):
+              j_i = int(j)
+              if j_i > 2 and (sg, sk_i, sh_mgmp, j_i) in x:
+                model += x[(sg, sk_i, sh_mgmp, j_i)] == 0
 
     penalti_list = []
 
     for g in GURU:
-      assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+      sg = str(g)
+      assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == sg]
       if assigned_k:
         for h in HARI:
-          for j in JAM_HARI.get(h, []):
-            j_i = force_int(j)
-            if any((g, k_i, h, j_i) in x for k_i in assigned_k):
-              model += (
-                  pulp.lpSum([
-                      x[g, k_i, h, j_i]
-                      for k_i in assigned_k
-                      if (g, k_i, h, j_i) in x
-                  ])
-                  <= 1
-              )
+          sh = str(h)
+          for j in JAM_HARI.get(sh, []):
+            j_i = int(j)
+            vars_for_hour = [
+                x[(sg, str(k_i), sh, j_i)]
+                for k_i in assigned_k
+                if (sg, str(k_i), sh, j_i) in x
+            ]
+            if vars_for_hour:
+              model += pulp.lpSum(vars_for_hour) <= 1
 
     for k in KELAS:
-      assigned_g = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
+      sk = str(k)
+      assigned_g = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == sk]
       if assigned_g:
         for h in HARI:
-          for j in JAM_HARI.get(h, []):
-            j_i = force_int(j)
-            if (k, h, j_i) in d_c2_minus:
+          sh = str(h)
+          for j in JAM_HARI.get(sh, []):
+            j_i = int(j)
+            if (sk, sh, j_i) in d_c2_minus:
+              vars_for_class = [
+                  x[(str(g_i), sk, sh, j_i)]
+                  for g_i in assigned_g
+                  if (str(g_i), sk, sh, j_i) in x
+              ]
               model += (
-                  pulp.lpSum([
-                      x[g_i, k, h, j_i]
-                      for g_i in assigned_g
-                      if (g_i, k, h, j_i) in x
-                  ])
-                  + d_c2_minus[k, h, j_i]
-                  == 1
+                  pulp.lpSum(vars_for_class) + d_c2_minus[(sk, sh, j_i)] == 1
               )
 
     for _, row in df_pair.iterrows():
       g, k, jw = (
-          force_str(row["Guru"]),
-          force_str(row["Kelas"]),
-          force_int(row["Jam_Wajib"]),
+          str(force_str(row["Guru"])),
+          str(force_str(row["Kelas"])),
+          int(force_int(row["Jam_Wajib"])),
       )
       if (g, k) in d_pair_minus and (g, k) in d_pair_plus:
+        vars_for_pair = [
+            x[(g, k, str(h), int(j))]
+            for h in HARI
+            for j in JAM_HARI.get(str(h), [])
+            if (g, k, str(h), int(j)) in x
+        ]
         model += (
-            pulp.lpSum([
-                x[g, k, h, force_int(j)]
-                for h in HARI
-                for j in JAM_HARI.get(h, [])
-                if (g, k, h, force_int(j)) in x
-            ])
-            + d_pair_minus[g, k]
-            - d_pair_plus[g, k]
+            pulp.lpSum(vars_for_pair)
+            + d_pair_minus[(g, k)]
+            - d_pair_plus[(g, k)]
             == jw
         )
 
     for g, k in valid_gk_pairs:
+      sg, sk = str(g), str(k)
       for h in HARI:
-        j_list = JAM_HARI.get(h, [])
+        sh = str(h)
+        j_list = JAM_HARI.get(sh, [])
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = (
-              force_int(j_list[idx]),
-              force_int(j_list[idx + 1]),
-              force_int(j_list[idx + 2]),
+              int(j_list[idx]),
+              int(j_list[idx + 1]),
+              int(j_list[idx + 2]),
           )
           if (
-              (g, k, h, j1) in x
-              and (g, k, h, j3) in x
-              and (g, k, h, j2) in x
-              and (g, k, h, j1) in z_gap
+              (sg, sk, sh, j1) in x
+              and (sg, sk, sh, j2) in x
+              and (sg, sk, sh, j3) in x
+              and (sg, sk, sh, j1) in z_gap
           ):
             model += (
-                x[g, k, h, j1]
-                + x[g, k, h, j3]
-                - x[g, k, h, j2]
-                - z_gap[g, k, h, j1]
+                x[(sg, sk, sh, j1)]
+                + x[(sg, sk, sh, j3)]
+                - x[(sg, sk, sh, j2)]
+                - z_gap[(sg, sk, sh, j1)]
                 <= 1
             )
 
     for g in GURU:
-      st_info = status_dict.get(g, {})
+      sg = str(g)
+      st_info = status_dict.get(sg, {})
       is_wali_val = force_str(st_info.get("Is_Wali")).upper()
       if is_wali_val in ["1", "1.0", "TRUE", "Y", "YES"]:
-        k_wali = force_str(st_info.get("Kelas_Wali")).upper()
+        k_wali = str(force_str(st_info.get("Kelas_Wali"))).upper()
         if (
-            (g, k_wali) in valid_gk_pairs
+            (sg, k_wali) in valid_gk_pairs
             and "Jumat" in HARI
-            and (g, k_wali, "Jumat", 1) in x
+            and (sg, k_wali, "Jumat", 1) in x
         ):
-          p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(g)}", lowBound=0)
+          p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(sg)}", lowBound=0)
           penalti_list.append(p_c6)
-          model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
+          model += x[(sg, k_wali, "Jumat", 1)] + p_c6 >= 1
 
     wakasek_teachers = [
-        g
+        str(g)
         for g in GURU
-        if force_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
+        if force_str(status_dict.get(str(g), {}).get("Is_Wakasek")).upper()
         in ["1", "1.0", "TRUE", "Y", "YES"]
     ]
     if wakasek_teachers:
       for h in HARI:
-        model += (
-            pulp.lpSum([
-                x[g_w, k_i, h, 1]
-                for g_w in wakasek_teachers
-                for k_i in KELAS
-                if (g_w, k_i, h, 1) in x
-            ])
-            <= 1
-        )
+        sh = str(h)
+        wakasek_vars = [
+            x[(g_w, str(k_i), sh, 1)]
+            for g_w in wakasek_teachers
+            for k_i in KELAS
+            if (g_w, str(k_i), sh, 1) in x
+        ]
+        if wakasek_vars:
+          model += pulp.lpSum(wakasek_vars) <= 1
 
     for g in GURU:
-      is_pjok_val = force_str(status_dict.get(g, {}).get("Is_PJOK")).upper()
+      sg = str(g)
+      is_pjok_val = force_str(status_dict.get(sg, {}).get("Is_PJOK")).upper()
       if is_pjok_val in ["1", "1.0", "TRUE", "Y", "YES"]:
-        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == sg]
         for h in HARI:
+          sh = str(h)
           for k_i in assigned_k:
-            for j in JAM_HARI.get(h, []):
-              j_i = force_int(j)
-              if j_i > 4 and (g, k_i, h, j_i) in x:
+            sk_i = str(k_i)
+            for j in JAM_HARI.get(sh, []):
+              j_i = int(j)
+              if j_i > 4 and (sg, sk_i, sh, j_i) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k_i)}_{j_i}",
+                    f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
                     lowBound=0,
                 )
                 penalti_list.append(p_c8)
-                model += x[g, k_i, h, j_i] - p_c8 <= 0
+                model += x[(sg, sk_i, sh, j_i)] - p_c8 <= 0
 
     model += (
         100000.0
-        * pulp.lpSum(
-            [d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys]
-        )
-        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for (k, h, j) in c2_keys])
+        * pulp.lpSum([d_pair_minus[key] + d_pair_plus[key] for key in pair_keys])
+        + 10000.0 * pulp.lpSum([d_c2_minus[key] for key in c2_keys])
         + 50000.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
         + 1000.0 * pulp.lpSum(penalti_list)
-        + 2.0
-        * pulp.lpSum([
-            d_h_plus[g, h] + d_h_minus[g, h] for g in GURU for h in HARI
-        ])
+        + 2.0 * pulp.lpSum([d_h_plus[key] + d_h_minus[key] for key in dh_keys])
     )
 
     solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
