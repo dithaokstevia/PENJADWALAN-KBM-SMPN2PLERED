@@ -72,13 +72,13 @@ def find_col(df, candidate_names, default_name=""):
   for name in candidate_names:
     for idx, c in enumerate(cols):
       if c.lower() == name.lower():
-        return df.columns[idx]
+        return str(df.columns[idx])
   for name in candidate_names:
     for idx, c in enumerate(cols):
       if name.lower() in c.lower() or c.lower() in name.lower():
-        return df.columns[idx]
-  if len(df.columns) > 0:
-    return df.columns[0]
+        return str(df.columns[idx])
+  if len(cols) > 0:
+    return str(df.columns[0])
   return str(default_name)
 
 
@@ -126,7 +126,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+          "Jumlah_Jam_KBM": list((7, 6, 6, 6, 6)),
       })
   )
   df_mgmp_init = (
@@ -332,13 +332,11 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_prim_int(j_list[idx])))
 
-    # Explicit dictionary comprehensions to ensure pure primitive keys and clean names
+    # Explicit dictionary comprehensions
     x = {}
     for g, k, h, j in var_keys:
       vname = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
-      x[(g, k, h, j)] = pulp.LpVariable(
-          vname, lowBound=0, upBound=1, cat=pulp.LpInteger
-      )
+      x[(g, k, h, j)] = pulp.LpVariable(vname, cat=pulp.LpBinary)
 
     d_pair_minus = {}
     d_pair_plus = {}
