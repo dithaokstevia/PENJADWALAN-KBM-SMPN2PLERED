@@ -118,7 +118,7 @@ else:
 # Default Initial DataFrames
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM":,
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -127,14 +127,14 @@ df_mgmp_init = pd.DataFrame({
 df_status_init = pd.DataFrame({
     "Guru": ["Guru A", "Guru B"],
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Is_Wali": ["0", "0"],
+    "Is_Wali": [0, 0],
     "Kelas_Wali": ["", ""],
-    "Is_Wakasek": ["0", "0"],
-    "Is_PJOK": ["0", "0"],
-    "Is_MGMP": ["0", "0"],
+    "Is_Wakasek": [0, 0],
+    "Is_PJOK": [0, 0],
+    "Is_MGMP": [0, 0],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
 )
 
 if excel_path is not None:
