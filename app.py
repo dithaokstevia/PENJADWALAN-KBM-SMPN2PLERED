@@ -199,25 +199,15 @@ if st.button(
     # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    # Standard PuLP dicts for decision variables
     var_keys = [
         (g, k, h, j)
         for (g, k) in valid_gk_pairs
         for h in HARI
         for j in JAM_HARI[h]
     ]
-    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
-
     pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    d_pair_minus = pulp.LpVariable.dicts("dpair_minus", pair_keys, lowBound=0)
-    d_pair_plus = pulp.LpVariable.dicts("dpair_plus", pair_keys, lowBound=0)
-
     c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
-
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
-    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
 
     gap_keys = []
     for g, k in valid_gk_pairs:
@@ -225,7 +215,52 @@ if st.button(
         j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
+
+    # Direct type-safe dictionary comprehensions
+    x = {
+        (g, k, h, j): pulp.LpVariable(
+            f"x_{clean_var_name(g)}_{clean_var_name(k)}_{clean_var_name(h)}_{j}",
+            cat=pulp.LpBinary,
+        )
+        for (g, k, h, j) in var_keys
+    }
+    d_pair_minus = {
+        (g, k): pulp.LpVariable(
+            f"dp_minus_{clean_var_name(g)}_{clean_var_name(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
+    d_pair_plus = {
+        (g, k): pulp.LpVariable(
+            f"dp_plus_{clean_var_name(g)}_{clean_var_name(k)}", lowBound=0
+        )
+        for (g, k) in pair_keys
+    }
+    d_c2_minus = {
+        (k, h, j): pulp.LpVariable(
+            f"dc2_minus_{clean_var_name(k)}_{clean_var_name(h)}_{j}", lowBound=0
+        )
+        for (k, h, j) in c2_keys
+    }
+    d_h_plus = {
+        (g, h): pulp.LpVariable(
+            f"dh_plus_{clean_var_name(g)}_{clean_var_name(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
+    d_h_minus = {
+        (g, h): pulp.LpVariable(
+            f"dh_minus_{clean_var_name(g)}_{clean_var_name(h)}", lowBound=0
+        )
+        for (g, h) in dh_keys
+    }
+    z_gap = {
+        (g, k, h, j): pulp.LpVariable(
+            f"zgap_{clean_var_name(g)}_{clean_var_name(k)}_{clean_var_name(h)}_{j}",
+            lowBound=0,
+        )
+        for (g, k, h, j) in gap_keys
+    }
 
     # Constraints
     for g in mgmp_teachers:
