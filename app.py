@@ -7,84 +7,72 @@ import pulp
 import streamlit as st
 
 
-def safe_pulp_var(name, lowBound=None, upBound=None, cat=pulp.LpContinuous):
-  """Pabrik variabel PuLP multi-versi (kompatibel dengan PuLP 2.x, 3.x, & Python 3.14+).
+def make_pulp_variable(
+    name: str, low_bound=None, up_bound=None, cat=pulp.LpContinuous
+):
+  """Universal PuLP variable factory function.
 
-  Menangani perbedaan Rust/PyO3 _rustcore pada PuLP 3.x di Streamlit Cloud.
+  Compatible with both PuLP 3.x (snake_case keyword arguments: low_bound,
+  up_bound) and PuLP 2.x (camelCase keyword arguments: lowBound, upBound or
+  positional args).
   """
-  lb = float(lowBound) if lowBound is not None else None
-  ub = float(upBound) if upBound is not None else None
+  lb = float(low_bound) if low_bound is not None else None
+  ub = float(up_bound) if up_bound is not None else None
 
-  rustcore = None
-  for mod_name in ['pulp.core._rustcore', 'pulp._rustcore', '_rustcore']:
+  # 1. Try PuLP 3.x (snake_case keyword arguments)
+  try:
+    kw = {}
+    if cat is not None:
+      kw['cat'] = cat
+    if lb is not None:
+      kw['low_bound'] = lb
+    if ub is not None:
+      kw['up_bound'] = ub
+    return pulp.LpVariable(name, **kw)
+  except (TypeError, ValueError, AttributeError):
+    pass
+
+  # 2. Try PuLP 2.x (camelCase keyword arguments)
+  try:
+    kw = {}
+    if cat is not None:
+      kw['cat'] = cat
+    if lb is not None:
+      kw['lowBound'] = lb
+    if ub is not None:
+      kw['upBound'] = ub
+    return pulp.LpVariable(name, **kw)
+  except (TypeError, ValueError, AttributeError):
+    pass
+
+  # 3. Try positional arguments (name, lowBound, upBound, cat)
+  try:
+    return pulp.LpVariable(name, lb, ub, cat)
+  except (TypeError, ValueError, AttributeError):
+    pass
+
+  # 4. Basic fallback
+  v = pulp.LpVariable(name)
+  if cat is not None:
     try:
-      mod = __import__(mod_name, fromlist=['Variable'])
-      if hasattr(mod, 'Variable'):
-        rustcore = mod
-        break
-    except ImportError:
-      pass
-
-  if rustcore is not None and hasattr(rustcore, 'Variable'):
-    cat_str = (
-        'Binary'
-        if cat == pulp.LpBinary or str(cat).lower() in ['binary', 'bin']
-        else (
-            'Integer'
-            if cat == pulp.LpInteger or str(cat).lower() in ['integer', 'int']
-            else 'Continuous'
-        )
-    )
-
-    rv = None
-    for try_fn in [
-        lambda: rustcore.Variable(name, cat_str, lb, ub),
-        lambda: rustcore.Variable(name, lb, ub, cat_str),
-        lambda: rustcore.Variable(name, cat=cat_str, low_bound=lb, up_bound=ub),
-        lambda: rustcore.Variable(name, cat=cat_str, lowBound=lb, upBound=ub),
-        lambda: rustcore.Variable(name, cat_str),
-        lambda: rustcore.Variable(name),
-    ]:
-      try:
-        res = try_fn()
-        if res is not None:
-          rv = res
-          break
-      except Exception:
-        pass
-
-    if rv is not None:
-      try:
-        return pulp.LpVariable(rv)
-      except Exception:
-        pass
-      try:
-        v = pulp.LpVariable.__new__(pulp.LpVariable)
-        v._var = rv
-        v.name = name
-        v.cat = cat
-        v.lowBound = lb
-        v.upBound = ub
-        return v
-      except Exception:
-        pass
-
-  for try_fn in [
-      lambda: pulp.LpVariable(name, lowBound=lb, upBound=ub, cat=cat),
-      lambda: pulp.LpVariable(name, low_bound=lb, up_bound=ub, cat=cat),
-      lambda: pulp.LpVariable(name, lb, ub, cat),
-      lambda: pulp.LpVariable(name, cat=cat),
-  ]:
-    try:
-      v = try_fn()
-      if v is not None and not (
-          hasattr(v, '_var') and isinstance(v._var, str)
-      ):
-        return v
+      v.cat = cat
     except Exception:
       pass
-
-  return pulp.LpVariable(name)
+  if lb is not None:
+    for attr in ['lowBound', 'low_bound', '_lowbound']:
+      if hasattr(v, attr):
+        try:
+          setattr(v, attr, lb)
+        except Exception:
+          pass
+  if ub is not None:
+    for attr in ['upBound', 'up_bound', '_upbound']:
+      if hasattr(v, attr):
+        try:
+          setattr(v, attr, ub)
+        except Exception:
+          pass
+  return v
 
 
 def force_str(val, default=''):
@@ -201,7 +189,7 @@ df_status_init = pd.DataFrame({
     'Is_MGMP': ['0', '0'],
 })
 df_beban_init = pd.DataFrame(
-    {'Guru': ['Guru A', 'Guru B'], 'Kelas': ['7A', '7B'], 'Jam_Wajib': [2, 2]}
+    {'Guru': ['Guru A', 'Guru B'], 'Kelas': ['7A', '7B'], 'Jam_Wajib': [4, 4]}
 )
 
 excel_path = None
@@ -425,66 +413,66 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables
+    # Create Decision Variables using make_pulp_variable
     x = {
-        (sg, sk, sh, sj): safe_pulp_var(
+        (sg, sk, sh, sj): make_pulp_variable(
             f'x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}',
-            lowBound=0,
-            upBound=1,
+            low_bound=0,
+            up_bound=1,
             cat=pulp.LpBinary,
         )
         for (sg, sk, sh, sj) in var_keys
     }
 
     d_pair_minus = {
-        (sg, sk): safe_pulp_var(
+        (sg, sk): make_pulp_variable(
             f'dp_minus_{safe_name(sg)}_{safe_name(sk)}',
-            lowBound=0,
+            low_bound=0,
             cat=pulp.LpContinuous,
         )
         for (sg, sk) in pair_keys
     }
 
     d_pair_plus = {
-        (sg, sk): safe_pulp_var(
+        (sg, sk): make_pulp_variable(
             f'dp_plus_{safe_name(sg)}_{safe_name(sk)}',
-            lowBound=0,
+            low_bound=0,
             cat=pulp.LpContinuous,
         )
         for (sg, sk) in pair_keys
     }
 
     d_c2_minus = {
-        (sk, sh, sj): safe_pulp_var(
+        (sk, sh, sj): make_pulp_variable(
             f'dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}',
-            lowBound=0,
+            low_bound=0,
             cat=pulp.LpContinuous,
         )
         for (sk, sh, sj) in c2_keys
     }
 
     d_h_plus = {
-        (sg, sh): safe_pulp_var(
+        (sg, sh): make_pulp_variable(
             f'dh_plus_{safe_name(sg)}_{safe_name(sh)}',
-            lowBound=0,
+            low_bound=0,
             cat=pulp.LpContinuous,
         )
         for (sg, sh) in dh_keys
     }
 
     d_h_minus = {
-        (sg, sh): safe_pulp_var(
+        (sg, sh): make_pulp_variable(
             f'dh_minus_{safe_name(sg)}_{safe_name(sh)}',
-            lowBound=0,
+            low_bound=0,
             cat=pulp.LpContinuous,
         )
         for (sg, sh) in dh_keys
     }
 
     z_gap = {
-        (sg, sk, sh, sj): safe_pulp_var(
+        (sg, sk, sh, sj): make_pulp_variable(
             f'zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}',
-            lowBound=0,
+            low_bound=0,
             cat=pulp.LpContinuous,
         )
         for (sg, sk, sh, sj) in gap_keys
@@ -595,16 +583,16 @@ if st.button(
       sg = str(g)
       st_info = status_dict.get(sg, {})
       is_wali_val = force_str(st_info.get('Is_Wali')).upper()
-      if is_wali_val in ['1', '1.0', 'TRUE', 'Y', 'YES']:
+      if is_wali_val in ['1', '1.0', 'TRUE', 'Y", "YES']:
         k_wali = str(force_str(st_info.get('Kelas_Wali'))).upper()
         if (
             (sg, k_wali) in valid_gk_pairs
             and 'Jumat' in HARI
             and (sg, k_wali, 'Jumat', 1) in x
         ):
-          p_c6 = safe_pulp_var(
+          p_c6 = make_pulp_variable(
               f'penalti_wali_{safe_name(sg)}',
-              lowBound=0,
+              low_bound=0,
               cat=pulp.LpContinuous,
           )
           penalti_list.append(p_c6)
@@ -640,9 +628,9 @@ if st.button(
             for j in JAM_HARI.get(sh, []):
               j_i = int(j)
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
-                p_c8 = safe_pulp_var(
+                p_c8 = make_pulp_variable(
                     f'penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}',
-                    lowBound=0,
+                    low_bound=0,
                     cat=pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
