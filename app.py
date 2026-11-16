@@ -27,7 +27,7 @@ uploaded_file = st.sidebar.file_uploader(
 # Default Initial DataFrames
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM":,
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -43,7 +43,7 @@ df_status_init = pd.DataFrame({
     "Is_MGMP": ["0", "0"],
 })
 df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [24, 24]}
+    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib":}
 )
 
 excel_path = None
@@ -345,46 +345,51 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Standard decision variables
+    # Standard decision variables created with positional arguments for 100% PuLP 2.x & 3.x compatibility
     x = {
         (sg, sk, sh, sj): pulp.LpVariable(
             f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            cat=pulp.LpBinary,
+            0,
+            1,
+            pulp.LpBinary,
         )
         for (sg, sk, sh, sj) in var_keys
     }
 
     d_pair_minus = {
         (sg, sk): pulp.LpVariable(
-            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}", lowBound=0
+            f"dp_minus_{safe_name(sg)}_{safe_name(sk)}", 0, None, pulp.LpContinuous
         )
         for (sg, sk) in pair_keys
     }
 
     d_pair_plus = {
         (sg, sk): pulp.LpVariable(
-            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}", lowBound=0
+            f"dp_plus_{safe_name(sg)}_{safe_name(sk)}", 0, None, pulp.LpContinuous
         )
         for (sg, sk) in pair_keys
     }
 
     d_c2_minus = {
         (sk, sh, sj): pulp.LpVariable(
-            f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}", lowBound=0
+            f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}",
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (sk, sh, sj) in c2_keys
     }
 
     d_h_plus = {
         (sg, sh): pulp.LpVariable(
-            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}", lowBound=0
+            f"dh_plus_{safe_name(sg)}_{safe_name(sh)}", 0, None, pulp.LpContinuous
         )
         for (sg, sh) in dh_keys
     }
 
     d_h_minus = {
         (sg, sh): pulp.LpVariable(
-            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}", lowBound=0
+            f"dh_minus_{safe_name(sg)}_{safe_name(sh)}", 0, None, pulp.LpContinuous
         )
         for (sg, sh) in dh_keys
     }
@@ -392,7 +397,9 @@ if st.button(
     z_gap = {
         (sg, sk, sh, sj): pulp.LpVariable(
             f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}",
-            lowBound=0,
+            0,
+            None,
+            pulp.LpContinuous,
         )
         for (sg, sk, sh, sj) in gap_keys
     }
@@ -509,7 +516,9 @@ if st.button(
             and "Jumat" in HARI
             and (sg, k_wali, "Jumat", 1) in x
         ):
-          p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(sg)}", lowBound=0)
+          p_c6 = pulp.LpVariable(
+              f"penalti_wali_{safe_name(sg)}", 0, None, pulp.LpContinuous
+          )
           penalti_list.append(p_c6)
           model += x[(sg, k_wali, "Jumat", 1)] + p_c6 >= 1
 
@@ -545,7 +554,9 @@ if st.button(
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
                 p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
-                    lowBound=0,
+                    0,
+                    None,
+                    pulp.LpContinuous,
                 )
                 penalti_list.append(p_c8)
                 model += x[(sg, sk_i, sh, j_i)] - p_c8 <= 0
