@@ -10,7 +10,8 @@ def to_scalar(val, default=None):
   if val is None:
     return default
   if isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
-    for item in val:
+    vals = val.tolist() if hasattr(val, "tolist") else list(val)
+    for item in vals:
       res = to_scalar(item, None)
       if res is not None:
         return res
@@ -21,7 +22,7 @@ def to_scalar(val, default=None):
   except Exception:
     pass
   s = str(val).strip()
-  if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT"]:
+  if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT", "<NA>"]:
     return default
   return val
 
@@ -65,6 +66,8 @@ def sanitize_dataframe(df):
 
 
 def find_col(df, candidate_names, default_name=""):
+  if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+    return str(default_name)
   cols = [str(c).strip() for c in df.columns]
   for name in candidate_names:
     for idx, c in enumerate(cols):
@@ -75,7 +78,7 @@ def find_col(df, candidate_names, default_name=""):
       if name.lower() in c.lower() or c.lower() in name.lower():
         return df.columns[idx]
   if len(df.columns) > 0:
-    return df.columns
+    return df.columns[0]
   return str(default_name)
 
 
@@ -123,7 +126,7 @@ try:
       if "Config_Sekolah" in xls.sheet_names
       else pd.DataFrame({
           "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-          "Jumlah_Jam_KBM": list((7, 6, 6, 6, 6)),
+          "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
       })
   )
   df_mgmp_init = (
@@ -329,26 +332,45 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((g_s, k_s, h_s, to_prim_int(j_list[idx])))
 
-    # PuLP LpVariable.dicts
-    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
-    d_pair_minus = pulp.LpVariable.dicts(
-        "dp_minus", pair_keys, lowBound=0, cat=pulp.LpContinuous
-    )
-    d_pair_plus = pulp.LpVariable.dicts(
-        "dp_plus", pair_keys, lowBound=0, cat=pulp.LpContinuous
-    )
-    d_c2_minus = pulp.LpVariable.dicts(
-        "dc2_minus", c2_keys, lowBound=0, cat=pulp.LpContinuous
-    )
-    d_h_plus = pulp.LpVariable.dicts(
-        "dh_plus", dh_keys, lowBound=0, cat=pulp.LpContinuous
-    )
-    d_h_minus = pulp.LpVariable.dicts(
-        "dh_minus", dh_keys, lowBound=0, cat=pulp.LpContinuous
-    )
-    z_gap = pulp.LpVariable.dicts(
-        "zgap", gap_keys, lowBound=0, cat=pulp.LpContinuous
-    )
+    # Explicit dictionary comprehensions to ensure pure primitive keys and clean names
+    x = {}
+    for g, k, h, j in var_keys:
+      vname = f"x_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}"
+      x[(g, k, h, j)] = pulp.LpVariable(
+          vname, lowBound=0, upBound=1, cat=pulp.LpInteger
+      )
+
+    d_pair_minus = {}
+    d_pair_plus = {}
+    for g, k in pair_keys:
+      d_pair_minus[(g, k)] = pulp.LpVariable(
+          f"dp_minus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+      )
+      d_pair_plus[(g, k)] = pulp.LpVariable(
+          f"dp_plus_{clean_str(g)}_{clean_str(k)}", lowBound=0
+      )
+
+    d_c2_minus = {}
+    for k, h, j in c2_keys:
+      d_c2_minus[(k, h, j)] = pulp.LpVariable(
+          f"dc2_minus_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+      )
+
+    d_h_plus = {}
+    d_h_minus = {}
+    for g, h in dh_keys:
+      d_h_plus[(g, h)] = pulp.LpVariable(
+          f"dh_plus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+      )
+      d_h_minus[(g, h)] = pulp.LpVariable(
+          f"dh_minus_{clean_str(g)}_{clean_str(h)}", lowBound=0
+      )
+
+    z_gap = {}
+    for g, k, h, j in gap_keys:
+      z_gap[(g, k, h, j)] = pulp.LpVariable(
+          f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}", lowBound=0
+      )
 
     # Constraints
     for g in mgmp_teachers:
@@ -455,7 +477,7 @@ if st.button(
             and (g, k_wali, "Jumat", 1) in x
         ):
           p_c6 = pulp.LpVariable(
-              name=f"penalti_wali_{clean_str(g)}",
+              f"penalti_wali_{clean_str(g)}",
               lowBound=0,
               cat=pulp.LpContinuous,
           )
@@ -490,7 +512,7 @@ if st.button(
               j_i = to_prim_int(j)
               if j_i > 4 and (g, k_i, h, j_i) in x:
                 p_c8 = pulp.LpVariable(
-                    name=f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j_i}",
+                    f"penalti_pjok_{clean_str(g)}_{clean_str(h)}_{clean_str(k_i)}_{j_i}",
                     lowBound=0,
                     cat=pulp.LpContinuous,
                 )
