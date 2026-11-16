@@ -131,9 +131,11 @@ df_status_init = pd.DataFrame({
     "Is_PJOK": ["0", "0"],
     "Is_MGMP": ["0", "0"],
 })
-df_beban_init = pd.DataFrame(
-    {"Guru": ["Guru A", "Guru B"], "Kelas": ["7A", "7B"], "Jam_Wajib": [4, 4]}
-)
+df_beban_init = pd.DataFrame({
+    "Guru": ["Guru A", "Guru B"],
+    "Kelas": ["7A", "7B"],
+    "Jam_Wajib": [4, 4],
+})
 
 if excel_path is not None:
   try:
