@@ -1,13 +1,93 @@
 import io
 import os
 import re
+import numpy as np
 import pandas as pd
 import pulp
 import streamlit as st
 
 
+def force_scalar_str(val, default=""):
+  if val is None:
+    return default
+  while isinstance(
+      val, (pd.Series, pd.DataFrame, pd.Index, np.ndarray, list, tuple)
+  ):
+    if isinstance(val, pd.DataFrame):
+      if val.empty:
+        return default
+      val = val.iloc[0, 0]
+    elif isinstance(val, (pd.Series, pd.Index, np.ndarray, list, tuple)):
+      if len(val) == 0:
+        return default
+      val = val.iloc[0] if hasattr(val, "iloc") else val[0]
+  try:
+    if pd.isna(val):
+      return default
+  except Exception:
+    pass
+  s = str(val).strip()
+  if not s or s.upper() in ["NAN", "NONE", "NULL", "NAT", "<NA>"]:
+    return default
+  return s
+
+
+def force_scalar_int(val, default=0):
+  sc = force_scalar_str(val, None)
+  if sc is None:
+    return default
+  try:
+    return int(float(sc))
+  except Exception:
+    return default
+
+
 def clean_var_name(s):
-  return re.sub(r"\W+", "_", str(s)).strip("_")
+  sc = force_scalar_str(s, "X")
+  res = re.sub(r"\W+", "_", sc).strip("_")
+  return res if res else "X"
+
+
+def sanitize_dataframe(df):
+  if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+    return pd.DataFrame()
+  df = df.copy()
+  if isinstance(df.columns, pd.MultiIndex):
+    flat_cols = []
+    for col in df.columns:
+      parts = [str(c).strip() for c in col if pd.notna(c) and str(c).strip()]
+      flat_cols.append("_".join(parts) if parts else "Unassigned")
+    df.columns = flat_cols
+  df.columns = [str(c).strip() for c in df.columns]
+
+  new_cols = []
+  col_counts = {}
+  for c in df.columns:
+    if c in col_counts:
+      col_counts[c] += 1
+      new_cols.append(f"{c}_{col_counts[c]}")
+    else:
+      col_counts[c] = 1
+      new_cols.append(c)
+  df.columns = new_cols
+  return df
+
+
+def find_col(df, candidate_names, default_name=""):
+  if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+    return str(default_name)
+  cols = [str(c).strip() for c in df.columns]
+  for name in candidate_names:
+    for idx, c in enumerate(cols):
+      if c.lower() == name.lower():
+        return str(df.columns[idx])
+  for name in candidate_names:
+    for idx, c in enumerate(cols):
+      if name.lower() in c.lower() or c.lower() in name.lower():
+        return str(df.columns[idx])
+  if len(df.columns) > 0:
+    return str(df.columns[0])
+  return str(default_name)
 
 
 st.set_page_config(
@@ -89,19 +169,19 @@ tab_cfg, tab_mgmp, tab_status, tab_beban = st.tabs([
 
 with tab_cfg:
   st.subheader("Pengaturan Jumlah Jam KBM per Hari")
-  df_config = st.data_editor(
+  df_config_edited = st.data_editor(
       df_config_init, num_rows="dynamic", use_container_width=True, key="ed_cfg"
   )
 
 with tab_mgmp:
   st.subheader("Pengaturan Hari Kegiatan MGMP per Mapel")
-  df_mgmp_rule = st.data_editor(
+  df_mgmp_edited = st.data_editor(
       df_mgmp_init, num_rows="dynamic", use_container_width=True, key="ed_mgmp"
   )
 
 with tab_status:
   st.subheader("Daftar Guru, Mata Pelajaran, dan Jabatan Khusus")
-  df_status_raw = st.data_editor(
+  df_status_edited = st.data_editor(
       df_status_init,
       num_rows="dynamic",
       use_container_width=True,
@@ -110,7 +190,7 @@ with tab_status:
 
 with tab_beban:
   st.subheader("Target Jam Wajib Pasangan Guru & Kelas")
-  df_beban_raw = st.data_editor(
+  df_beban_edited = st.data_editor(
       df_beban_init,
       num_rows="dynamic",
       use_container_width=True,
@@ -126,104 +206,155 @@ if st.button(
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
-    # Preprocess Data
-    df_beban_raw["Guru"] = (
-        df_beban_raw["Guru"].replace(r"^\s*$", None, regex=True).ffill()
+    # Sanitize all dataframes
+    df_beban_raw = sanitize_dataframe(df_beban_edited)
+    df_config = sanitize_dataframe(df_config_edited)
+    df_status_raw = sanitize_dataframe(df_status_edited)
+    df_mgmp_rule = sanitize_dataframe(df_mgmp_edited)
+
+    col_guru = find_col(df_beban_raw, ["Guru", "Nama_Guru", "Nama Guru"], "Guru")
+    col_kelas = find_col(
+        df_beban_raw, ["Kelas", "Nama_Kelas", "Rombel"], "Kelas"
     )
-    df_beban_raw["Guru"] = df_beban_raw["Guru"].astype(str).str.strip()
-    df_beban_raw["Kelas"] = (
-        df_beban_raw["Kelas"].astype(str).str.strip().str.upper()
-    )
-    df_beban_raw["Jam_Wajib"] = (
-        pd.to_numeric(df_beban_raw["Jam_Wajib"], errors="coerce")
-        .fillna(0)
-        .astype(int)
+    col_jw = find_col(
+        df_beban_raw, ["Jam_Wajib", "Jam Wajib", "Target_Jam", "Jam"], "Jam_Wajib"
     )
 
+    g_list, k_list, jw_list = [], [], []
+    if not df_beban_raw.empty and col_guru in df_beban_raw.columns:
+      last_guru = None
+      for _, r in df_beban_raw.iterrows():
+        g_val = force_scalar_str(r.get(col_guru))
+        if g_val:
+          last_guru = g_val
+        else:
+          g_val = last_guru
+        k_val = force_scalar_str(r.get(col_kelas)).upper()
+        jw_val = force_scalar_int(r.get(col_jw), 0)
+        if g_val and k_val and jw_val > 0:
+          g_list.append(g_val)
+          k_list.append(k_val)
+          jw_list.append(jw_val)
+
+    df_beban_clean = pd.DataFrame(
+        {"Guru": g_list, "Kelas": k_list, "Jam_Wajib": jw_list}
+    )
     INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
-    df_beban = df_beban_raw[
-        (~df_beban_raw["Guru"].str.upper().isin(INVALID_TEXTS))
-        & (~df_beban_raw["Kelas"].isin(INVALID_TEXTS))
-        & (df_beban_raw["Jam_Wajib"] > 0)
+    df_beban = df_beban_clean[
+        (~df_beban_clean["Guru"].str.upper().isin(INVALID_TEXTS))
+        & (~df_beban_clean["Kelas"].isin(INVALID_TEXTS))
+        & (df_beban_clean["Jam_Wajib"] > 0)
     ].copy()
 
-    df_status_raw["Guru"] = df_status_raw["Guru"].astype(str).str.strip()
-    df_status = df_status_raw[
-        ~df_status_raw["Guru"].str.upper().isin(INVALID_TEXTS)
-    ].drop_duplicates(subset=["Guru"]).copy()
     df_pair = df_beban.groupby(["Guru", "Kelas"], as_index=False)[
         "Jam_Wajib"
     ].sum()
+    df_pair = df_pair[df_pair["Jam_Wajib"] > 0].copy()
 
-    HARI = list(df_config["Hari"].astype(str).str.strip())
+    col_status_guru = find_col(
+        df_status_raw, ["Guru", "Nama_Guru", "Nama Guru"], "Guru"
+    )
+    status_dict = {}
+    if not df_status_raw.empty and col_status_guru in df_status_raw.columns:
+      for _, r in df_status_raw.iterrows():
+        g_key = force_scalar_str(r.get(col_status_guru))
+        if (
+            g_key
+            and g_key.upper() not in INVALID_TEXTS
+            and g_key not in status_dict
+        ):
+          status_dict[g_key] = r.to_dict()
+
+    col_hari = find_col(df_config, ["Hari", "Nama_Hari", "Day"], "Hari")
+    col_jam_count = find_col(
+        df_config,
+        ["Jumlah_Jam_KBM", "Jumlah_Jam", "Jam_KBM", "Jam"],
+        "Jumlah_Jam_KBM",
+    )
+
+    HARI = []
     JAM_HARI = {}
-    for _, r in df_config.iterrows():
-      h_name = str(r["Hari"]).strip()
-      j_count = int(r["Jumlah_Jam_KBM"])
-      JAM_HARI[h_name] = list(range(1, j_count + 1))
+    if not df_config.empty and col_hari in df_config.columns:
+      for _, r in df_config.iterrows():
+        h_name = force_scalar_str(r.get(col_hari))
+        j_cnt = force_scalar_int(r.get(col_jam_count), 6)
+        if h_name:
+          HARI.append(h_name)
+          JAM_HARI[h_name] = list(range(1, j_cnt + 1))
 
-    HARI_MGMP_MAPEL = dict(
-        zip(
-            df_mgmp_rule["Mata_Pelajaran"]
-            .astype(str)
-            .str.strip()
-            .str.upper(),
-            df_mgmp_rule["Hari_MGMP"].astype(str).str.strip(),
-        )
+    col_mgmp_mapel = find_col(
+        df_mgmp_rule,
+        ["Mata_Pelajaran", "Mapel", "Mata Pelajaran"],
+        "Mata_Pelajaran",
     )
+    col_mgmp_hari = find_col(
+        df_mgmp_rule, ["Hari_MGMP", "Hari MGMP", "Hari"], "Hari_MGMP"
+    )
+    HARI_MGMP_MAPEL = {}
+    if not df_mgmp_rule.empty:
+      for _, r in df_mgmp_rule.iterrows():
+        m_name = force_scalar_str(r.get(col_mgmp_mapel)).upper()
+        h_mgmp = force_scalar_str(r.get(col_mgmp_hari))
+        if m_name and h_mgmp:
+          HARI_MGMP_MAPEL[m_name] = h_mgmp
 
-    GURU = sorted(list(df_pair["Guru"].unique()))
-    KELAS = sorted(list(df_pair["Kelas"].unique()))
-    status_dict = (
-        df_status.set_index("Guru").to_dict("index") if not df_status.empty else {}
-    )
-    valid_gk_pairs = set(
-        (row["Guru"], row["Kelas"])
+    GURU = sorted(list(set(force_scalar_str(g) for g in df_pair["Guru"])))
+    KELAS = sorted(list(set(force_scalar_str(k) for k in df_pair["Kelas"])))
+    valid_gk_pairs = [
+        (force_scalar_str(row["Guru"]), force_scalar_str(row["Kelas"]))
         for _, row in df_pair.iterrows()
-        if row["Jam_Wajib"] > 0
-    )
+        if force_scalar_int(row["Jam_Wajib"]) > 0
+    ]
 
     mgmp_teachers = set()
     for g in GURU:
       st_info = status_dict.get(g, {})
-      val = st_info.get("Is_MGMP")
-      if pd.notna(val) and str(val).strip().upper() in [
-          "1",
-          "1.0",
-          "TRUE",
-          "Y",
-          "YES",
-      ]:
+      val = force_scalar_str(st_info.get("Is_MGMP")).upper()
+      if val in ["1", "1.0", "TRUE", "Y", "YES"]:
         mgmp_teachers.add(g)
 
     # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
     var_keys = [
-        (g, k, h, j)
+        (
+            force_scalar_str(g),
+            force_scalar_str(k),
+            force_scalar_str(h),
+            force_scalar_int(j),
+        )
         for (g, k) in valid_gk_pairs
         for h in HARI
-        for j in JAM_HARI[h]
+        for j in JAM_HARI.get(force_scalar_str(h), [])
     ]
-    pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
-    c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
-    dh_keys = [(g, h) for g in GURU for h in HARI]
+    pair_keys = [
+        (force_scalar_str(g), force_scalar_str(k)) for (g, k) in valid_gk_pairs
+    ]
+    c2_keys = [
+        (force_scalar_str(k), force_scalar_str(h), force_scalar_int(j))
+        for k in KELAS
+        for h in HARI
+        for j in JAM_HARI.get(force_scalar_str(h), [])
+    ]
+    dh_keys = [
+        (force_scalar_str(g), force_scalar_str(h)) for g in GURU for h in HARI
+    ]
 
     gap_keys = []
     for g, k in valid_gk_pairs:
+      g_s, k_s = force_scalar_str(g), force_scalar_str(k)
       for h in HARI:
-        j_list = JAM_HARI[h]
+        h_s = force_scalar_str(h)
+        j_list = JAM_HARI.get(h_s, [])
         for idx in range(len(j_list) - 2):
-          gap_keys.append((g, k, h, j_list[idx]))
+          gap_keys.append((g_s, k_s, h_s, force_scalar_int(j_list[idx])))
 
-    # Direct type-safe dictionary comprehensions
-    x = {
-        (g, k, h, j): pulp.LpVariable(
-            f"x_{clean_var_name(g)}_{clean_var_name(k)}_{clean_var_name(h)}_{j}",
-            cat=pulp.LpBinary,
-        )
-        for (g, k, h, j) in var_keys
-    }
+    # Dict comprehension guaranteed 100% scalar primitive keys
+    x = {}
+    for g, k, h, j in var_keys:
+      vname = f"x_{clean_var_name(g)}_{clean_var_name(k)}_{clean_var_name(h)}_{j}"
+      x[(g, k, h, j)] = pulp.LpVariable(vname, cat=pulp.LpBinary)
+
     d_pair_minus = {
         (g, k): pulp.LpVariable(
             f"dp_minus_{clean_var_name(g)}_{clean_var_name(k)}", lowBound=0
@@ -265,116 +396,148 @@ if st.button(
     # Constraints
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
-      mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
+      mapel_raw = force_scalar_str(st_info.get("Mata_Pelajaran"))
       mapel_list = [
           m.strip().upper() for m in mapel_raw.split(",") if m.strip()
       ]
       for m_name in mapel_list:
         h_mgmp = HARI_MGMP_MAPEL.get(m_name)
         if h_mgmp and h_mgmp in HARI:
-          assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
-          for k in assigned_k:
-            for j in JAM_HARI[h_mgmp]:
-              if j > 2:
-                model += x[g, k, h_mgmp, j] == 0
+          assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
+          for k_i in assigned_k:
+            for j in JAM_HARI.get(h_mgmp, []):
+              j_i = force_scalar_int(j)
+              if j_i > 2 and (g, k_i, h_mgmp, j_i) in x:
+                model += x[g, k_i, h_mgmp, j_i] == 0
 
     penalti_list = []
 
     for g in GURU:
-      assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+      assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
       if assigned_k:
         for h in HARI:
-          for j in JAM_HARI[h]:
-            model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
+          for j in JAM_HARI.get(h, []):
+            j_i = force_scalar_int(j)
+            if any((g, k_i, h, j_i) in x for k_i in assigned_k):
+              model += (
+                  pulp.lpSum([
+                      x[g, k_i, h, j_i]
+                      for k_i in assigned_k
+                      if (g, k_i, h, j_i) in x
+                  ])
+                  <= 1
+              )
 
     for k in KELAS:
-      assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
+      assigned_g = [g_i for (g_i, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
         for h in HARI:
-          for j in JAM_HARI[h]:
-            model += (
-                pulp.lpSum([x[g, k, h, j] for g in assigned_g])
-                + d_c2_minus[k, h, j]
-                == 1
-            )
+          for j in JAM_HARI.get(h, []):
+            j_i = force_scalar_int(j)
+            if (k, h, j_i) in d_c2_minus:
+              model += (
+                  pulp.lpSum([
+                      x[g_i, k, h, j_i]
+                      for g_i in assigned_g
+                      if (g_i, k, h, j_i) in x
+                  ])
+                  + d_c2_minus[k, h, j_i]
+                  == 1
+              )
 
     for _, row in df_pair.iterrows():
-      g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
-      model += (
-          pulp.lpSum([x[g, k, h, j] for h in HARI for j in JAM_HARI[h]])
-          + d_pair_minus[g, k]
-          - d_pair_plus[g, k]
-          == jw
+      g, k, jw = (
+          force_scalar_str(row["Guru"]),
+          force_scalar_str(row["Kelas"]),
+          force_scalar_int(row["Jam_Wajib"]),
       )
+      if (g, k) in d_pair_minus and (g, k) in d_pair_plus:
+        model += (
+            pulp.lpSum([
+                x[g, k, h, force_scalar_int(j)]
+                for h in HARI
+                for j in JAM_HARI.get(h, [])
+                if (g, k, h, force_scalar_int(j)) in x
+            ])
+            + d_pair_minus[g, k]
+            - d_pair_plus[g, k]
+            == jw
+        )
 
     for g, k in valid_gk_pairs:
       for h in HARI:
-        j_list = JAM_HARI[h]
+        j_list = JAM_HARI.get(h, [])
         for idx in range(len(j_list) - 2):
-          j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
-          model += (
-              x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1]
-              <= 1
+          j1, j2, j3 = (
+              force_scalar_int(j_list[idx]),
+              force_scalar_int(j_list[idx + 1]),
+              force_scalar_int(j_list[idx + 2]),
           )
+          if (
+              (g, k, h, j1) in x
+              and (g, k, h, j3) in x
+              and (g, k, h, j2) in x
+              and (g, k, h, j1) in z_gap
+          ):
+            model += (
+                x[g, k, h, j1]
+                + x[g, k, h, j3]
+                - x[g, k, h, j2]
+                - z_gap[g, k, h, j1]
+                <= 1
+            )
 
     for g in GURU:
       st_info = status_dict.get(g, {})
-      is_wali_val = st_info.get("Is_Wali")
-      if pd.notna(is_wali_val) and str(is_wali_val).strip().upper() in [
-          "1",
-          "1.0",
-          "TRUE",
-          "Y",
-          "YES",
-      ]:
-        if pd.notna(st_info.get("Kelas_Wali")):
-          k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
-          if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
-            p_c6 = pulp.LpVariable(
-                f"penalti_wali_{clean_var_name(g)}", lowBound=0
-            )
-            penalti_list.append(p_c6)
-            model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
+      is_wali_val = force_scalar_str(st_info.get("Is_Wali")).upper()
+      if is_wali_val in ["1", "1.0", "TRUE", "Y", "YES"]:
+        k_wali = force_scalar_str(st_info.get("Kelas_Wali")).upper()
+        if (
+            (g, k_wali) in valid_gk_pairs
+            and "Jumat" in HARI
+            and (g, k_wali, "Jumat", 1) in x
+        ):
+          p_c6 = pulp.LpVariable(
+              f"penalti_wali_{clean_var_name(g)}", lowBound=0
+          )
+          penalti_list.append(p_c6)
+          model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
     wakasek_teachers = [
         g
         for g in GURU
-        if pd.notna(status_dict.get(g, {}).get("Is_Wakasek"))
-        and str(status_dict.get(g, {}).get("Is_Wakasek")).strip().upper()
+        if force_scalar_str(status_dict.get(g, {}).get("Is_Wakasek")).upper()
         in ["1", "1.0", "TRUE", "Y", "YES"]
     ]
     if wakasek_teachers:
       for h in HARI:
         model += (
             pulp.lpSum([
-                x[g_w, k, h, 1]
+                x[g_w, k_i, h, 1]
                 for g_w in wakasek_teachers
-                for k in valid_gk_pairs
-                if (g_w, k) in valid_gk_pairs
+                for k_i in KELAS
+                if (g_w, k_i, h, 1) in x
             ])
             <= 1
         )
 
     for g in GURU:
-      is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
-      if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
-          "1",
-          "1.0",
-          "TRUE",
-          "Y",
-          "YES",
-      ]:
-        assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+      is_pjok_val = force_scalar_str(
+          status_dict.get(g, {}).get("Is_PJOK")
+      ).upper()
+      if is_pjok_val in ["1", "1.0", "TRUE", "Y", "YES"]:
+        assigned_k = [k_i for (g_i, k_i) in valid_gk_pairs if g_i == g]
         for h in HARI:
-          for k in assigned_k:
-            for j in JAM_HARI[h]:
-              if j > 4:
+          for k_i in assigned_k:
+            for j in JAM_HARI.get(h, []):
+              j_i = force_scalar_int(j)
+              if j_i > 4 and (g, k_i, h, j_i) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{clean_var_name(g)}_{clean_var_name(h)}_{clean_var_name(k)}_{j}",
+                    f"penalti_pjok_{clean_var_name(g)}_{clean_var_name(h)}_{clean_var_name(k_i)}_{j_i}",
                     lowBound=0,
                 )
                 penalti_list.append(p_c8)
-                model += x[g, k, h, j] - p_c8 <= 0
+                model += x[g, k_i, h, j_i] - p_c8 <= 0
 
     model += (
         100000.0
