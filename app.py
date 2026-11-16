@@ -115,7 +115,7 @@ else:
       excel_path = possible_name
       break
 
-# Default Initial DataFrames with explicit valid lists
+# Default Initial DataFrames
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
     "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
@@ -328,15 +328,12 @@ if st.button(
     # Build PuLP Model
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    var_keys = []
-    for g, k in valid_gk_pairs:
-      sg, sk = str(g), str(k)
-      for h in HARI:
-        sh = str(h)
-        for j in JAM_HARI.get(sh, []):
-          sj = int(j)
-          var_keys.append((sg, sk, sh, sj))
-
+    var_keys = [
+        (str(g), str(k), str(h), int(j))
+        for (g, k) in valid_gk_pairs
+        for h in HARI
+        for j in JAM_HARI.get(str(h), [])
+    ]
     pair_keys = [(str(g), str(k)) for (g, k) in valid_gk_pairs]
     c2_keys = [
         (str(k), str(h), int(j))
@@ -355,56 +352,14 @@ if st.button(
         for idx in range(len(j_list) - 2):
           gap_keys.append((sg, sk, sh, int(j_list[idx])))
 
-    # Create Decision Variables with 100% standard single-arg init + attribute assignments
-    x = {}
-    for g, k, h, j in var_keys:
-      sg, sk, sh, sj = str(g), str(k), str(h), int(j)
-      vname = f"x_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}"
-      v = pulp.LpVariable(vname)
-      v.cat = pulp.LpBinary
-      v.lowBound = 0
-      v.upBound = 1
-      x[(sg, sk, sh, sj)] = v
-
-    d_pair_minus = {}
-    d_pair_plus = {}
-    for g, k in pair_keys:
-      sg, sk = str(g), str(k)
-      vm = pulp.LpVariable(f"dp_minus_{safe_name(sg)}_{safe_name(sk)}")
-      vm.lowBound = 0
-      d_pair_minus[(sg, sk)] = vm
-
-      vp = pulp.LpVariable(f"dp_plus_{safe_name(sg)}_{safe_name(sk)}")
-      vp.lowBound = 0
-      d_pair_plus[(sg, sk)] = vp
-
-    d_c2_minus = {}
-    for k, h, j in c2_keys:
-      sk, sh, sj = str(k), str(h), int(j)
-      vc2 = pulp.LpVariable(f"dc2_minus_{safe_name(sk)}_{safe_name(sh)}_{sj}")
-      vc2.lowBound = 0
-      d_c2_minus[(sk, sh, sj)] = vc2
-
-    d_h_plus = {}
-    d_h_minus = {}
-    for g, h in dh_keys:
-      sg, sh = str(g), str(h)
-      vhp = pulp.LpVariable(f"dh_plus_{safe_name(sg)}_{safe_name(sh)}")
-      vhp.lowBound = 0
-      d_h_plus[(sg, sh)] = vhp
-
-      vhm = pulp.LpVariable(f"dh_minus_{safe_name(sg)}_{safe_name(sh)}")
-      vhm.lowBound = 0
-      d_h_minus[(sg, sh)] = vhm
-
-    z_gap = {}
-    for g, k, h, j in gap_keys:
-      sg, sk, sh, sj = str(g), str(k), str(h), int(j)
-      vgap = pulp.LpVariable(
-          f"zgap_{safe_name(sg)}_{safe_name(sk)}_{safe_name(sh)}_{sj}"
-      )
-      vgap.lowBound = 0
-      z_gap[(sg, sk, sh, sj)] = vgap
+    # Create Decision Variables using official PuLP dicts API (100% portable)
+    x = pulp.LpVariable.dicts("x", var_keys, cat=pulp.LpBinary)
+    d_pair_minus = pulp.LpVariable.dicts("dp_minus", pair_keys, lowBound=0)
+    d_pair_plus = pulp.LpVariable.dicts("dp_plus", pair_keys, lowBound=0)
+    d_c2_minus = pulp.LpVariable.dicts("dc2_minus", c2_keys, lowBound=0)
+    d_h_plus = pulp.LpVariable.dicts("dh_plus", dh_keys, lowBound=0)
+    d_h_minus = pulp.LpVariable.dicts("dh_minus", dh_keys, lowBound=0)
+    z_gap = pulp.LpVariable.dicts("z_gap", gap_keys, lowBound=0)
 
     # Constraints
     for g in mgmp_teachers:
@@ -495,8 +450,8 @@ if st.button(
           )
           if (
               (sg, sk, sh, j1) in x
-              and (sg, sk, sh, j2) in x
               and (sg, sk, sh, j3) in x
+              and (sg, sk, sh, j2) in x
               and (sg, sk, sh, j1) in z_gap
           ):
             model += (
@@ -518,8 +473,7 @@ if st.button(
             and "Jumat" in HARI
             and (sg, k_wali, "Jumat", 1) in x
         ):
-          p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(sg)}")
-          p_c6.lowBound = 0
+          p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(sg)}", lowBound=0)
           penalti_list.append(p_c6)
           model += x[(sg, k_wali, "Jumat", 1)] + p_c6 >= 1
 
@@ -554,9 +508,9 @@ if st.button(
               j_i = int(j)
               if j_i > 4 and (sg, sk_i, sh, j_i) in x:
                 p_c8 = pulp.LpVariable(
-                    f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}"
+                    f"penalti_pjok_{safe_name(sg)}_{safe_name(sh)}_{safe_name(sk_i)}_{j_i}",
+                    lowBound=0,
                 )
-                p_c8.lowBound = 0
                 penalti_list.append(p_c8)
                 model += x[(sg, sk_i, sh, j_i)] - p_c8 <= 0
 
