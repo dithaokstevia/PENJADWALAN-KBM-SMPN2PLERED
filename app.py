@@ -307,24 +307,14 @@ if st.button(
         for j in JAM_HARI.get(h, list(range(1, 7)))
     ]
     x = {
-        key: pulp.LpVariable(
-            f"x_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}_{key[3]}",
+        (g, k, h, j): pulp.LpVariable(
+            f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
             cat=pulp.LpBinary,
         )
-        for key in var_keys
+        for (g, k, h, j) in var_keys
     }
 
-    # 2. Daily active indicator variable per pair & day
-    ghk_keys = [(g, k, h) for (g, k) in valid_gk_pairs for h in HARI]
-    u = {
-        key: pulp.LpVariable(
-            f"u_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}",
-            cat=pulp.LpBinary,
-        )
-        for key in ghk_keys
-    }
-
-    # 3. Workload deviation variables
+    # 2. Workload deviation variables (Soft C3)
     pair_keys = list(valid_gk_pairs)
     d_pair_minus = {
         (g, k): pulp.LpVariable(
@@ -339,7 +329,7 @@ if st.button(
         for (g, k) in pair_keys
     }
 
-    # 4. Empty class deviation variables
+    # 3. Empty class deviation variables (Soft C2)
     c2_keys = [
         (k, h, j)
         for k in KELAS
@@ -347,14 +337,14 @@ if st.button(
         for j in JAM_HARI.get(h, list(range(1, 7)))
     ]
     d_c2_minus = {
-        key: pulp.LpVariable(
-            f"dc2_minus_{safe_name(key[0])}_{safe_name(key[1])}_{key[2]}",
+        (k, h, j): pulp.LpVariable(
+            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}",
             lowBound=0,
         )
-        for key in c2_keys
+        for (k, h, j) in c2_keys
     }
 
-    # 5. Teacher daily workload variables
+    # 4. Teacher daily workload variables
     dh_keys = [(g, h) for g in GURU for h in HARI]
     d_h_plus = {
         (g, h): pulp.LpVariable(
@@ -369,41 +359,9 @@ if st.button(
         for (g, h) in dh_keys
     }
 
-    # 6. Gap variables
-    gap_keys = []
-    for g, k in valid_gk_pairs:
-      for h in HARI:
-        j_list = JAM_HARI.get(h, list(range(1, 7)))
-        for idx in range(len(j_list) - 2):
-          gap_keys.append((g, k, h, j_list[idx]))
-    z_gap = {
-        key: pulp.LpVariable(
-            f"z_gap_{safe_name(key[0])}_{safe_name(key[1])}_{safe_name(key[2])}_{key[3]}",
-            lowBound=0,
-        )
-        for key in gap_keys
-    }
-
-    # Constraints
-    # MGMP Rule
-    for g in mgmp_teachers:
-      st_info = status_dict.get(g, {})
-      mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
-      mapel_list = [
-          m.strip().upper() for m in mapel_raw.split(",") if m.strip()
-      ]
-      for m_name in mapel_list:
-        h_mgmp = HARI_MGMP_MAPEL.get(m_name)
-        if h_mgmp and h_mgmp in HARI:
-          assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
-          for k in assigned_k:
-            for j in JAM_HARI.get(h_mgmp, list(range(1, 7))):
-              if j > 2:
-                model += x[g, k, h_mgmp, j] == 0
-
     penalti_list = []
 
-    # C1: Max 1 Class per Teacher per Slot
+    # Hard C1: Max 1 Class per Teacher per Slot
     for g in GURU:
       assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
       if assigned_k:
@@ -411,9 +369,9 @@ if st.button(
           for j in JAM_HARI.get(h, list(range(1, 7))):
             model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
 
-    # C2: Exactly 1 Teacher per Class per Slot
+    # Soft C2: Exactly 1 Teacher per Class per Slot
     for k in KELAS:
-      assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
+      assigned_g = [g for (g_i, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
         for h in HARI:
           for j in JAM_HARI.get(h, list(range(1, 7))):
@@ -423,7 +381,7 @@ if st.button(
                 == 1
             )
 
-    # C3: Workload Target
+    # Soft C3: Workload Target
     for _, row in df_pair.iterrows():
       g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
       model += (
@@ -437,71 +395,59 @@ if st.button(
           == jw
       )
 
-    # Linking u_{g,k,h} to x_{g,k,h,j}
-    for g, k in valid_gk_pairs:
-      for h in HARI:
-        j_list = JAM_HARI.get(h, list(range(1, 7)))
-        max_j = len(j_list)
-        model += (
-            pulp.lpSum([x[g, k, h, j] for j in j_list]) <= max_j * u[g, k, h]
-        )
-        for j in j_list:
-          model += u[g, k, h] >= x[g, k, h, j]
-
-    # Rules for 5, 4, 3, 2, 1 Hours
+    # Soft Daily Hour Limits (5h -> max 3/day, 4h/3h/2h -> max 2/day)
     for (g, k), jw in pair_jw_dict.items():
-      if jw == 5:
-        # 5 jam: Maksimal 3 jam per hari (sehingga terbagi 3+2 atau 2+2+1)
-        for h in HARI:
-          model += (
-              pulp.lpSum([
-                  x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
-              ])
-              <= 3
-          )
-      elif jw == 4:
-        # 4 jam: Maksimal 2 jam per hari (sehingga terbagi 2+2)
-        for h in HARI:
-          model += (
-              pulp.lpSum([
-                  x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
-              ])
-              <= 2
-          )
-      elif jw == 3:
-        # 3 jam: Maksimal 2 jam per hari (sehingga terbagi 2+1)
-        for h in HARI:
-          model += (
-              pulp.lpSum([
-                  x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
-              ])
-              <= 2
-          )
-      elif jw == 2:
-        # 2 jam: Maksimal 2 jam per hari
-        for h in HARI:
-          model += (
-              pulp.lpSum([
-                  x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
-              ])
-              <= 2
-          )
+      max_daily = 3 if jw == 5 else (2 if jw in (2, 3, 4) else 1)
+      for h in HARI:
+        p_day = pulp.LpVariable(
+            f"p_day_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}", lowBound=0
+        )
+        penalti_list.append(20000.0 * p_day)
+        model += (
+            pulp.lpSum([
+                x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
+            ])
+            - p_day
+            <= max_daily
+        )
 
-    # C4: Block Teaching Kontinu (Sekali duduk tanpa jeda di hari yang sama)
+    # Soft Gap Penalty / Continuous Block Teaching
     for g, k in valid_gk_pairs:
       for h in HARI:
         j_list = JAM_HARI.get(h, list(range(1, 7)))
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
+          z_gap = pulp.LpVariable(
+              f"z_gap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j1}",
+              lowBound=0,
+          )
+          penalti_list.append(50000.0 * z_gap)
           model += (
-              x[g, k, h, j1]
-              + x[g, k, h, j3]
-              - x[g, k, h, j2]
-              - z_gap[g, k, h, j1]
-              <= 1
+              x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap <= 1
           )
 
-    # C6: Wali Kelas (Jumat jam 1)
+    # Soft MGMP Rule
+    for g in mgmp_teachers:
+      st_info = status_dict.get(g, {})
+      mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
+      mapel_list = [
+          m.strip().upper() for m in mapel_raw.split(",") if m.strip()
+      ]
+      for m_name in mapel_list:
+        h_mgmp = HARI_MGMP_MAPEL.get(m_name)
+        if h_mgmp and h_mgmp in HARI:
+          assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+          for k in assigned_k:
+            for j in JAM_HARI.get(h_mgmp, list(range(1, 7))):
+              if j > 2:
+                p_mgmp = pulp.LpVariable(
+                    f"p_mgmp_{safe_name(g)}_{safe_name(k)}_{safe_name(h_mgmp)}_{j}",
+                    lowBound=0,
+                )
+                penalti_list.append(50000.0 * p_mgmp)
+                model += x[g, k, h_mgmp, j] - p_mgmp <= 0
+
+    # Soft Wali Kelas (Jumat jam 1)
     for g in GURU:
       st_info = status_dict.get(g, {})
       is_wali_val = st_info.get("Is_Wali")
@@ -516,10 +462,10 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(g)}", lowBound=0)
-            penalti_list.append(p_c6)
+            penalti_list.append(1000.0 * p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # C7: Wakasek
+    # Soft Wakasek
     wakasek_teachers = [
         g
         for g in GURU
@@ -527,19 +473,18 @@ if st.button(
         and str(status_dict.get(g, {}).get("Is_Wakasek")).strip().upper()
         in ["1", "1.0", "TRUE", "Y", "YES"]
     ]
-    if wakasek_teachers:
+    wakasek_pairs = [
+        (g, k) for (g, k) in valid_gk_pairs if g in wakasek_teachers
+    ]
+    if wakasek_pairs:
       for h in HARI:
+        p_wak = pulp.LpVariable(f"penalti_wakasek_{safe_name(h)}", lowBound=0)
+        penalti_list.append(1000.0 * p_wak)
         model += (
-            pulp.lpSum([
-                x[g_w, k, h, 1]
-                for g_w in wakasek_teachers
-                for k in valid_gk_pairs
-                if (g_w, k) in valid_gk_pairs
-            ])
-            <= 1
+            pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) - p_wak <= 1
         )
 
-    # C8: Guru PJOK (Maksimal jam 4)
+    # Soft PJOK
     for g in GURU:
       is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
       if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
@@ -558,47 +503,43 @@ if st.button(
                     f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
                     lowBound=0,
                 )
-                penalti_list.append(p_c8)
+                penalti_list.append(1000.0 * p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
     # Objective Function
     model += (
         100000.0
         * pulp.lpSum([
-            d_pair_minus[g, k] + d_pair_plus[g, k] for g, k in pair_keys
+            d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys
         ])
-        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for k, h, j in c2_keys])
-        + 50000.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
-        + 10.0 * pulp.lpSum([u[key] for key in ghk_keys])
-        + 1000.0 * pulp.lpSum(penalti_list)
+        + 10000.0 * pulp.lpSum([d_c2_minus[key] for key in c2_keys])
+        + pulp.lpSum(penalti_list)
         + 2.0
         * pulp.lpSum([
             d_h_plus[g, h] + d_h_minus[g, h] for g in GURU for h in HARI
         ])
     )
 
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
+    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.01)
     model.solve(solver)
 
-    if model.status in [pulp.LpStatusOptimal, 1]:
-      records = []
-      for (g, k, h, j), var in x.items():
-        if var.varValue and var.varValue > 0.5:
-          mapel_name = pair_mapel.get((g, k), "")
-          records.append({
-              "Hari": h,
-              "Jam_Ke": j,
-              "Kelas": k,
-              "Mata_Pelajaran": mapel_name,
-              "Guru": g,
-              "Tampilan_Kelas": (
-                  f"{mapel_name}\n({g})" if mapel_name else str(g)
-              ),
-              "Tampilan_Guru": (
-                  f"{k}\n({mapel_name})" if mapel_name else str(k)
-              ),
-          })
+    records = []
+    for (g, k, h, j), var in x.items():
+      if var.varValue and var.varValue > 0.5:
+        mapel_name = pair_mapel.get((g, k), "")
+        records.append({
+            "Hari": h,
+            "Jam_Ke": j,
+            "Kelas": k,
+            "Mata_Pelajaran": mapel_name,
+            "Guru": g,
+            "Tampilan_Kelas": (
+                f"{mapel_name}\n({g})" if mapel_name else str(g)
+            ),
+            "Tampilan_Guru": f"{k}\n({mapel_name})" if mapel_name else str(k),
+        })
 
+    if len(records) > 0:
       df_hasil = pd.DataFrame(records)
       df_hasil.sort_values(by=["Hari", "Jam_Ke", "Kelas"], inplace=True)
 
