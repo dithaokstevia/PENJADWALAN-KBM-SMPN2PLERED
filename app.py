@@ -20,7 +20,7 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
-# Sidebar for file upload
+# Sidebar untuk upload file Excel
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
     "Unggah file Excel (misal: data_jadwal(1).xlsx)", type=["xlsx", "xls"]
@@ -37,10 +37,10 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Safe default DataFrames
+# Initial DataFrames dengan nilai tuple aman
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
+    "Jumlah_Jam_KBM": (7, 6, 6, 6, 6),
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -59,7 +59,7 @@ df_beban_init = pd.DataFrame({
     "Guru": ["Guru A", "Guru B"],
     "Kelas": ["7A", "7B"],
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Jam_Wajib": [4, 4],
+    "Jam_Wajib": (4, 4),
 })
 
 if excel_path is not None:
@@ -107,7 +107,7 @@ def buat_dict_var(nama_prefix, daftar_kunci, lowBound=None, cat=pulp.LpContinuou
   return hasil
 
 
-# Initialize Session State
+# Inisialisasi Session State
 if "solved" not in st.session_state:
   st.session_state["solved"] = False
 if "df_hasil" not in st.session_state:
@@ -157,7 +157,7 @@ with tab_beban:
 
 st.divider()
 
-# Solver Execution
+# Tombol Eksekusi Solver
 if st.button(
     "🚀 Jalankan Optimasi Jadwal (BIP 0-1)",
     type="primary",
@@ -282,7 +282,7 @@ if st.button(
           gap_keys.append((g, k, h, j_list[idx]))
     z_gap = buat_dict_var("z_gap", gap_keys, lowBound=0)
 
-    # Constraints
+    # Kendala
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
       mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -448,7 +448,7 @@ if st.button(
           " atau jam wajib."
       )
 
-# Display Results from Session State
+# Tampilan Hasil dari Session State
 if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   df_hasil = st.session_state["df_hasil"]
   df_beban = st.session_state["df_beban_clean"]
