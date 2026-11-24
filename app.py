@@ -662,4 +662,3 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
-    
