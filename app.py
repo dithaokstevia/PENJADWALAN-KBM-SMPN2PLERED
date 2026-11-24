@@ -164,7 +164,7 @@ if st.button(
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
-    # Preprocess Data
+    # Preprocess Data Beban & Status
     df_beban_raw["Guru"] = (
         df_beban_raw["Guru"].replace(r"^\s*$", None, regex=True).ffill()
     )
@@ -177,6 +177,14 @@ if st.button(
         .fillna(0)
         .astype(int)
     )
+
+    # Sanitasi df_config agar Jumlah_Jam_KBM dijamin angka integer murni (Bebas ValueError)
+    df_config["Jumlah_Jam_KBM"] = (
+        pd.to_numeric(df_config["Jumlah_Jam_KBM"], errors="coerce")
+        .fillna(6)
+        .astype(int)
+    )
+    df_config["Hari"] = df_config["Hari"].astype(str).str.strip()
 
     col_mapel_beban = (
         "Mata_Pelajaran"
@@ -217,10 +225,10 @@ if st.button(
         "Jam_Wajib"
     ].sum()
 
-    HARI = list(df_config["Hari"].astype(str).str.strip())
+    HARI = list(df_config["Hari"])
     JAM_HARI = {}
     for _, r in df_config.iterrows():
-      h_name = str(r["Hari"]).strip()
+      h_name = str(r["Hari"])
       j_count = int(r["Jumlah_Jam_KBM"])
       JAM_HARI[h_name] = list(range(1, j_count + 1))
 
@@ -344,12 +352,10 @@ if st.button(
 
     # Aturan Maksimal Jam Harian per Mapel & Penalti Jam Terisolasi (Sekali Duduk)
     for (g, k), jw in pair_jw_dict.items():
-      # Untuk Mapel 4 Jam & 2 Jam: Maksimal 2 jam dalam sehari (memaksa 4 jam jadi 2+2)
-      if jw in [2, 4]:
+      if jw in (2, 4):
         for h in HARI:
           model += pulp.lpSum([x[g, k, h, j] for j in JAM_HARI[h]]) <= 2
 
-      # Mencegah jam berdiri sendiri (isolated 1 hour)
       for h in HARI:
         j_list = JAM_HARI[h]
         for j in j_list:
@@ -427,7 +433,7 @@ if st.button(
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
-    # Fungsi Tujuan dengan Penalti Jam Terisolasi (75.000)
+    # Fungsi Tujuan
     model += (
         100000.0
         * pulp.lpSum([
@@ -488,7 +494,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
   GURU = sorted(list(df_hasil["Guru"].unique()))
   KELAS = sorted(list(df_hasil["Kelas"].unique()))
-  HARI = list(df_config["Hari"].astype(str).str.strip())
+  HARI = list(df_config["Hari"])
 
   st.success("✅ Status Optimasi: Solusi Optimal Ditemukan & Tersimpan.")
 
