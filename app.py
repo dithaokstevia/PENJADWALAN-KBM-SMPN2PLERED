@@ -116,7 +116,7 @@ toggle_c3 = st.sidebar.toggle(
     "3. Pemenuhan Target Wajib Jam Mengajar (Guru-Kelas)", value=True
 )
 toggle_block_alloc = st.sidebar.toggle(
-    "4. Aturan Alokasi Jam Harian (2, 3, 4, 5 Jam Presisi Blok)", value=True
+    "4. Aturan Alokasi Jam Harian Presisi", value=True
 )
 toggle_contig = st.sidebar.toggle(
     "5. Aturan Jam Berurutan / Anti-Diselang dalam 1 Hari", value=True
@@ -129,14 +129,12 @@ toggle_mgmp = st.sidebar.toggle(
     "7. Aturan Penanggung Jawab / Pengurus MGMP (Maksimal Jam ke-2)", value=True
 )
 mgmp_mode = "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel ke Pengurus"
-manual_mgmp_teachers = []
 if toggle_mgmp:
     mgmp_mode = st.sidebar.radio(
         "Mode Pemilihan Guru MGMP:",
         [
             "Gunakan Pengurus MGMP (Is_MGMP_P) + Bagi Sisa Mapel ke Pengurus",
             "Gunakan Status Penanggung Jawab (Is_MGMP)",
-            "Pilih Manual Guru MGMP",
             "Otomatis 1 Guru per Mapel MGMP",
         ],
         key="mgmp_mode_radio",
@@ -246,25 +244,6 @@ with tab_beban:
         num_rows="dynamic",
         use_container_width=True,
         key="ed_beban",
-    )
-
-if toggle_mgmp and mgmp_mode == "Pilih Manual Guru MGMP":
-    all_teachers_list = (
-        sorted(
-            list(
-                set(
-                    df_status_edited["Guru"]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                )
-            )
-        )
-        if "Guru" in df_status_edited.columns
-        else []
-    )
-    manual_mgmp_teachers = st.sidebar.multiselect(
-        "Pilih Nama-Nama Guru MGMP:", options=all_teachers_list, default=[]
     )
 
 st.divider()
@@ -476,6 +455,43 @@ if st.button(
                             "Guru_Yang_Datang_MGMP": min_g,
                             "Kategori": "Pengurus (Penugasan Mapel Tambahan)",
                         })
+            elif mgmp_mode == "Gunakan Status Penanggung Jawab (Is_MGMP)":
+                for g in GURU:
+                    st_info = status_dict.get(g, {})
+                    val = to_str(st_info.get("Is_MGMP")).upper()
+                    if val in ["1", "1.0", "TRUE", "Y", "YES"]:
+                        mgmp_teachers.add(g)
+                        mapel_raw = to_str(st_info.get("Mata_Pelajaran"))
+                        mapel_list = [m.strip().upper() for m in mapel_raw.split(",") if m.strip()]
+                        for m_upper in mapel_list:
+                            h_mgmp = HARI_MGMP_MAPEL.get(m_upper)
+                            if h_mgmp:
+                                mgmp_teacher_mapel_restrictions.append((g, m_upper, h_mgmp))
+                                mgmp_info_list.append({
+                                    "Mata_Pelajaran": m_upper,
+                                    "Hari_MGMP": h_mgmp,
+                                    "Guru_Yang_Datang_MGMP": g,
+                                    "Kategori": "Penanggung Jawab (Is_MGMP)",
+                                })
+            elif mgmp_mode == "Otomatis 1 Guru per Mapel MGMP":
+                for m_name, h_mgmp in HARI_MGMP_MAPEL.items():
+                    m_upper = m_name.upper()
+                    found_g = None
+                    for g in GURU:
+                        st_info = status_dict.get(g, {})
+                        g_mapels = [x.strip().upper() for x in to_str(st_info.get("Mata_Pelajaran")).upper().split(",") if x.strip()]
+                        if m_upper in g_mapels:
+                            found_g = g
+                            break
+                    if found_g:
+                        mgmp_teachers.add(found_g)
+                        mgmp_teacher_mapel_restrictions.append((found_g, m_upper, h_mgmp))
+                        mgmp_info_list.append({
+                            "Mata_Pelajaran": m_upper,
+                            "Hari_MGMP": h_mgmp,
+                            "Guru_Yang_Datang_MGMP": found_g,
+                            "Kategori": "Otomatis 1 Guru",
+                        })
 
         st.session_state["mgmp_selected_info"] = mgmp_info_list
 
@@ -559,16 +575,15 @@ if st.button(
                 h_s = to_str(h)
                 j_list = JAM_HARI.get(h_s, [])
                 for idx in range(len(j_list) - 2):
-                    for idx2 in range(idx + 2, len(j_list)):
-                        gap_keys.append((g_s, k_s, h_s, to_int(j_list[idx]), to_int(j_list[idx2])))
+                    gap_keys.append((g_s, k_s, h_s, to_int(j_list[idx])))
 
         z_gap = {
-            (g, k, h, j1, j2): pulp.LpVariable(
-                f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j1}_{j2}",
+            (g, k, h, j): pulp.LpVariable(
+                f"zgap_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{j}",
                 lowBound=0,
                 cat=pulp.LpContinuous,
             )
-            for (g, k, h, j1, j2) in gap_keys
+            for (g, k, h, j) in gap_keys
         }
 
         penalti_list = []
@@ -657,42 +672,23 @@ if st.button(
                         == jw
                     )
 
-        # Rule 4: Presisi Alokasi Jam Harian (2, 3, 4, 5 Jam)
+        # Rule 4: Presisi Alokasi Jam Harian (Consecutive & Max Days per Pair)
         if toggle_block_alloc:
             for _, row in df_pair.iterrows():
                 g, k, jw = to_str(row["Guru"]), to_str(row["Kelas"]), to_int(row["Jam_Wajib"])
                 if (g, k) in valid_gk_pairs:
-                    u_block = {}
+                    w_day = {}
                     for h in HARI:
-                        for b in [1, 2, 3, 4]:
-                            u_block[(h, b)] = pulp.LpVariable(
-                                f"ublock_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}_{b}",
-                                cat=pulp.LpBinary
-                            )
-                        daily_hours = pulp.lpSum([x[g, k, h, j] for j in JAM_HARI.get(h, []) if (g, k, h, j) in x])
-                        model += daily_hours == pulp.lpSum([b * u_block[(h, b)] for b in [1, 2, 3, 4]])
-                        model += pulp.lpSum([u_block[(h, b)] for b in [1, 2, 3, 4]]) <= 1
+                        w_day[h] = pulp.LpVariable(
+                            f"wday_{clean_str(g)}_{clean_str(k)}_{clean_str(h)}",
+                            cat=pulp.LpBinary
+                        )
+                        daily_hrs = pulp.lpSum([x[g, k, h, j] for j in JAM_HARI.get(h, []) if (g, k, h, j) in x])
+                        max_h_cap = min(jw, 4)
+                        model += daily_hrs <= max_h_cap * w_day[h]
 
-                    if jw == 2:
-                        model += pulp.lpSum([u_block[(h, 2)] for h in HARI]) == 1
-                        model += pulp.lpSum([u_block[(h, b)] for h in HARI for b in [1, 3, 4]]) == 0
-                    elif jw == 3:
-                        z3 = pulp.LpVariable(f"z3_{clean_str(g)}_{clean_str(k)}", cat=pulp.LpBinary)
-                        model += pulp.lpSum([u_block[(h, 3)] for h in HARI]) == z3
-                        model += pulp.lpSum([u_block[(h, 2)] for h in HARI]) == 1 - z3
-                        model += pulp.lpSum([u_block[(h, 1)] for h in HARI]) == 1 - z3
-                        model += pulp.lpSum([u_block[(h, 4)] for h in HARI]) == 0
-                    elif jw == 4:
-                        z4 = pulp.LpVariable(f"z4_{clean_str(g)}_{clean_str(k)}", cat=pulp.LpBinary)
-                        model += pulp.lpSum([u_block[(h, 4)] for h in HARI]) == z4
-                        model += pulp.lpSum([u_block[(h, 2)] for h in HARI]) == 2 * (1 - z4)
-                        model += pulp.lpSum([u_block[(h, b)] for h in HARI for b in [1, 3]]) == 0
-                    elif jw == 5:
-                        z5 = pulp.LpVariable(f"z5_{clean_str(g)}_{clean_str(k)}", cat=pulp.LpBinary)
-                        model += pulp.lpSum([u_block[(h, 3)] for h in HARI]) == z5
-                        model += pulp.lpSum([u_block[(h, 2)] for h in HARI]) == 2 - z5
-                        model += pulp.lpSum([u_block[(h, 1)] for h in HARI]) == 1 - z5
-                        model += pulp.lpSum([u_block[(h, 4)] for h in HARI]) == 0
+                    max_allowed_days = max(1, int(np.ceil(jw / 2.0)))
+                    model += pulp.lpSum([w_day[h] for h in HARI]) <= max_allowed_days
 
         # Rule 5: Anti-Diselang / Jam Berurutan (Dalam 1 Hari)
         if toggle_contig:
@@ -700,15 +696,12 @@ if st.button(
                 for h in HARI:
                     j_list = JAM_HARI.get(h, [])
                     for idx in range(len(j_list) - 2):
-                        for idx2 in range(idx + 2, len(j_list)):
-                            j1, j3 = to_int(j_list[idx]), to_int(j_list[idx2])
-                            for mid_idx in range(idx + 1, idx2):
-                                j2 = to_int(j_list[mid_idx])
-                                if (g, k, h, j1) in x and (g, k, h, j2) in x and (g, k, h, j3) in x:
-                                    if (g, k, h, j1, j3) in z_gap:
-                                        model += (
-                                            x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1, j3] <= 1
-                                        )
+                        j1, j2, j3 = to_int(j_list[idx]), to_int(j_list[idx + 1]), to_int(j_list[idx + 2])
+                        if (g, k, h, j1) in x and (g, k, h, j2) in x and (g, k, h, j3) in x:
+                            if (g, k, h, j1) in z_gap:
+                                model += (
+                                    x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap[g, k, h, j1] <= 1
+                                )
 
         # Rule 6: Pemerataan Jam 1 per Guru
         if toggle_jam1_guru:
@@ -803,9 +796,9 @@ if st.button(
             ])
             + 10000000.0
             * pulp.lpSum([d_c2_minus[k, h, j] for (k, h, j) in c2_keys])
-            + 5.0 * pulp.lpSum([z_gap[key] for key in gap_keys if key in z_gap])
-            + 10.0 * pulp.lpSum(penalti_list)
-            + 1.0
+            + 5000.0 * pulp.lpSum([z_gap[key] for key in gap_keys if key in z_gap])
+            + 1000.0 * pulp.lpSum(penalti_list)
+            + 2.0
             * pulp.lpSum([
                 d_h_plus[g, h] + d_h_minus[g, h]
                 for g in GURU
