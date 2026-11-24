@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -15,8 +16,8 @@ st.set_page_config(
 st.title("🏫 Simulator & Optimasi Penjadwalan KBM SMPN 2 Plered")
 st.markdown(
     "Aplikasi berbasis **Streamlit** dan **Binary Integer Programming (BIP 0-1)**"
-    " untuk mengoptimalkan jadwal mengajar guru secara dinamis dengan aturan jam"
-    " berurutan (tanpa diselang) dan alokasi jam harian yang presisi."
+    " untuk mengoptimalkan jadwal mengajar guru secara dinamis dengan evaluasi"
+    " diagnostik lengkap, alokasi jam harian presisi, dan aturan anti-diselang."
 )
 
 
@@ -152,7 +153,7 @@ toggle_beban_harian = st.sidebar.toggle(
     "11. Pemerataan Jam Mengajar Guru per Hari", value=True
 )
 
-# Inisialisasi DataFrame Default
+# Inisialisasi Data Default
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
     "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
@@ -202,6 +203,10 @@ if "df_config_clean" not in st.session_state:
     st.session_state["df_config_clean"] = None
 if "mgmp_selected_info" not in st.session_state:
     st.session_state["mgmp_selected_info"] = []
+if "HARI" not in st.session_state:
+    st.session_state["HARI"] = []
+if "JAM_HARI" not in st.session_state:
+    st.session_state["JAM_HARI"] = {}
 
 st.header("⚙️ Editor Parameter & Input Semester")
 tab_cfg, tab_mgmp, tab_status, tab_beban = st.tabs([
@@ -375,6 +380,9 @@ if st.button(
                 "Kamis": list(range(1, 7)),
                 "Jumat": list(range(1, 7)),
             }
+
+        st.session_state["HARI"] = HARI
+        st.session_state["JAM_HARI"] = JAM_HARI
 
         col_mgmp_mapel = find_col(
             df_mgmp_rule,
@@ -841,20 +849,23 @@ if st.button(
 # ==========================================
 # DISPLAY HASIL & ANALISIS EVALUASI LENGKAP
 # ==========================================
-if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
+if st.session_state.get("solved") and st.session_state.get("df_hasil") is not None:
     df_hasil = st.session_state["df_hasil"]
     df_beban = st.session_state["df_beban_clean"]
     df_config = st.session_state["df_config_clean"]
 
     GURU = sorted(list(df_hasil["Guru"].unique()))
     KELAS = sorted(list(df_hasil["Kelas"].unique()))
-    HARI = [
-        str(h).strip()
-        for h in df_config["Hari"]
-        if pd.notna(h)
-        and str(h).strip()
-        and str(h).strip().upper() not in ["NAN", "NONE", "", "NULL"]
-    ]
+    HARI = st.session_state.get("HARI", [])
+    if not HARI:
+        HARI = [
+            str(h).strip()
+            for h in df_config["Hari"]
+            if pd.notna(h)
+            and str(h).strip()
+            and str(h).strip().upper() not in ["NAN", "NONE", "", "NULL"]
+        ]
+    JAM_HARI = st.session_state.get("JAM_HARI", {})
 
     total_target_jam_guru = int(df_beban["Jam_Wajib"].sum())
     total_realisasi_jam_guru = int(len(df_hasil))
@@ -889,7 +900,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
         f"{total_realisasi_jam_guru}/{total_slot_kbm_sekolah} Slot Terisi",
     )
 
-    if st.session_state["mgmp_selected_info"]:
+    if st.session_state.get("mgmp_selected_info"):
         with st.expander(
             "👥 Penugasan Utusan Guru yang Harus Datang MGMP per Mata Pelajaran",
             expanded=True,
@@ -1366,7 +1377,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
                 df_unfulfilled_g.to_excel(
                     writer, sheet_name="Guru_Kurang_Jam", index=False
                 )
-            if st.session_state["mgmp_selected_info"]:
+            if st.session_state.get("mgmp_selected_info"):
                 pd.DataFrame(st.session_state["mgmp_selected_info"]).to_excel(
                     writer, sheet_name="Utusan_MGMP_Mapel", index=False
                 )
