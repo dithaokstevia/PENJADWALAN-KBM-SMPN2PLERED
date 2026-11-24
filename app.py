@@ -67,17 +67,19 @@ def clean_str(s):
 
 
 def find_col(df, candidate_names, default_name=""):
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return str(default_name)
     cols = [str(c).strip() for c in df.columns]
     for name in candidate_names:
         for idx, c in enumerate(cols):
             if c.lower() == name.lower():
-                return df.columns[idx]
+                return str(df.columns[idx])
     for name in candidate_names:
         for idx, c in enumerate(cols):
             if name.lower() in c.lower() or c.lower() in name.lower():
-                return df.columns[idx]
+                return str(df.columns[idx])
     if len(df.columns) > 0:
-        return df.columns[0]
+        return str(df.columns[0])
     return str(default_name)
 
 
@@ -812,24 +814,46 @@ if st.button(
             ])
         )
 
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
-        model.solve(solver)
+        # Robust Solver Execution Chain with Fallbacks
+        solver_executed = False
+        try:
+            solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60)
+            model.solve(solver)
+            solver_executed = True
+        except Exception:
+            pass
+
+        if not solver_executed:
+            try:
+                solver = pulp.PULP_CBC_CMD(msg=False)
+                model.solve(solver)
+                solver_executed = True
+            except Exception:
+                pass
+
+        if not solver_executed:
+            try:
+                model.solve()
+                solver_executed = True
+            except Exception as e_final:
+                st.error(f"❌ Terjadi kesalahan pada solver PuLP: {e_final}")
 
         records = []
-        for (g, k, h, j), var in x.items():
-            if var.varValue and var.varValue > 0.5:
-                mapel_name = pair_mapel.get((g, k), "")
-                records.append({
-                    "Hari": h,
-                    "Jam_Ke": j,
-                    "Kelas": k,
-                    "Mata_Pelajaran": mapel_name,
-                    "Guru": g,
-                    "Tampilan_Kelas": (
-                        f"{mapel_name}\n({g})" if mapel_name else str(g)
-                    ),
-                    "Tampilan_Guru": f"{k}\n({mapel_name})" if mapel_name else str(k),
-                })
+        if model.status in [pulp.LpStatusOptimal, 1]:
+            for (g, k, h, j), var in x.items():
+                if var.varValue and var.varValue > 0.5:
+                    mapel_name = pair_mapel.get((g, k), "")
+                    records.append({
+                        "Hari": h,
+                        "Jam_Ke": j,
+                        "Kelas": k,
+                        "Mata_Pelajaran": mapel_name,
+                        "Guru": g,
+                        "Tampilan_Kelas": (
+                            f"{mapel_name}\n({g})" if mapel_name else str(g)
+                        ),
+                        "Tampilan_Guru": f"{k}\n({mapel_name})" if mapel_name else str(k),
+                    })
 
         if len(records) > 0:
             df_hasil = pd.DataFrame(records)
@@ -842,8 +866,7 @@ if st.button(
         else:
             st.session_state["solved"] = False
             st.error(
-                "❌ Solver tidak menemukan solusi yang valid. Periksa kembali"
-                " batasan atau jam wajib."
+                "❌ Solver tidak menemukan solusi yang valid atau melebihi kapasitas memori. Periksa kembali batasan atau jam wajib."
             )
 
 # ==========================================
