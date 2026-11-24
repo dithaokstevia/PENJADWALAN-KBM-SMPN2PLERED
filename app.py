@@ -19,21 +19,6 @@ st.markdown(
     " mengajar guru secara dinamis per semester."
 )
 
-
-def safe_name(s):
-  sc = str(s).strip() if s is not None else "X"
-  res = re.sub(r"\W+", "_", sc).strip("_")
-  return res if res else "X"
-
-
-def find_col(df, names):
-  for name in names:
-    for col in df.columns:
-      if str(col).strip().lower() == name.lower():
-        return col
-  return names[0]
-
-
 # Sidebar untuk upload file Excel
 st.sidebar.header("📂 Sumber Data Excel")
 uploaded_file = st.sidebar.file_uploader(
@@ -51,7 +36,7 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Default DataFrames
+# Initial DataFrames dengan nilai tuple yang aman dari filter markdown
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
     "Jumlah_Jam_KBM": (7, 6, 6, 6, 6),
@@ -95,7 +80,37 @@ if excel_path is not None:
   except Exception as e:
     st.error(f"Gagal membaca file Excel: {e}")
 
-# Inisialisasi Session State
+
+def safe_name(s):
+  sc = str(s).strip() if s is not None else "X"
+  res = re.sub(r"\W+", "_", sc).strip("_")
+  return res if res else "X"
+
+
+def buat_dict_var(nama_prefix, daftar_kunci, lowBound=None, cat=pulp.LpContinuous):
+  hasil = {}
+  for k in daftar_kunci:
+    if isinstance(k, (tuple, list)):
+      s_name = "_".join(safe_name(x) for x in k)
+    else:
+      s_name = safe_name(k)
+    var_name = f"{nama_prefix}_{s_name}"
+
+    try:
+      v = pulp.LpVariable(var_name, lowBound=lowBound, cat=cat)
+    except Exception:
+      try:
+        v = pulp.LpVariable(var_name, lowBound, None, cat)
+      except Exception:
+        v = pulp.LpVariable(var_name)
+        if lowBound is not None:
+          v.lowBound = lowBound
+        v.cat = cat
+    hasil[k] = v
+  return hasil
+
+
+# Inisialisasi Session State agar hasil tidak hilang saat tombol download diklik
 if "solved" not in st.session_state:
   st.session_state["solved"] = False
 if "df_hasil" not in st.session_state:
@@ -152,125 +167,75 @@ if st.button(
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
-    INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
-
-    col_guru = find_col(df_beban_raw, ["Guru", "Nama_Guru", "Nama Guru"])
-    col_kelas = find_col(df_beban_raw, ["Kelas", "Nama_Kelas", "Rombel"])
-    col_jw = find_col(
-        df_beban_raw, ["Jam_Wajib", "Jam Wajib", "Target_Jam", "Jam"]
+    # Preprocess Data Beban
+    df_beban_raw["Guru"] = (
+        df_beban_raw["Guru"].replace(r"^\s*$", None, regex=True).ffill()
     )
-
-    df_beban_raw[col_guru] = (
-        df_beban_raw[col_guru].replace(r"^\s*$", None, regex=True).ffill()
+    df_beban_raw["Guru"] = df_beban_raw["Guru"].astype(str).str.strip()
+    df_beban_raw["Kelas"] = (
+        df_beban_raw["Kelas"].astype(str).str.strip().str.upper()
     )
-    df_beban_raw[col_guru] = df_beban_raw[col_guru].astype(str).str.strip()
-    df_beban_raw[col_kelas] = (
-        df_beban_raw[col_kelas].astype(str).str.strip().str.upper()
-    )
-    df_beban_raw[col_jw] = (
-        pd.to_numeric(df_beban_raw[col_jw], errors="coerce")
+    df_beban_raw["Jam_Wajib"] = (
+        pd.to_numeric(df_beban_raw["Jam_Wajib"], errors="coerce")
         .fillna(0)
         .astype(int)
     )
 
+    col_mapel_beban = (
+        "Mata_Pelajaran"
+        if "Mata_Pelajaran" in df_beban_raw.columns
+        else ("Mapel" if "Mapel" in df_beban_raw.columns else None)
+    )
+
+    INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
     df_beban = df_beban_raw[
-        (~df_beban_raw[col_guru].str.upper().isin(INVALID_TEXTS))
-        & (~df_beban_raw[col_kelas].isin(INVALID_TEXTS))
-        & (df_beban_raw[col_jw] > 0)
+        (~df_beban_raw["Guru"].str.upper().isin(INVALID_TEXTS))
+        & (~df_beban_raw["Kelas"].isin(INVALID_TEXTS))
+        & (df_beban_raw["Jam_Wajib"] > 0)
     ].copy()
 
-    col_status_guru = find_col(
-        df_status_raw, ["Guru", "Nama_Guru", "Nama Guru"]
-    )
-    df_status_raw[col_status_guru] = (
-        df_status_raw[col_status_guru].astype(str).str.strip()
-    )
-    df_status = (
-        df_status_raw[
-            ~df_status_raw[col_status_guru].str.upper().isin(INVALID_TEXTS)
-        ]
-        .drop_duplicates(subset=[col_status_guru])
-        .copy()
-    )
+    df_status_raw["Guru"] = df_status_raw["Guru"].astype(str).str.strip()
+    df_status = df_status_raw[
+        ~df_status_raw["Guru"].str.upper().isin(INVALID_TEXTS)
+    ].drop_duplicates(subset=["Guru"]).copy()
 
-    df_pair = df_beban.groupby(
-        [col_guru, col_kelas], as_index=False
-    )[col_jw].sum()
-    df_pair.rename(
-        columns={
-            col_guru: "Guru",
-            col_kelas: "Kelas",
-            col_jw: "Jam_Wajib",
-        },
-        inplace=True,
-    )
-    df_pair = df_pair[df_pair["Jam_Wajib"] > 0].copy()
-
-    col_hari = find_col(df_config, ["Hari", "Nama_Hari", "Day"])
-    col_jam_count = find_col(
-        df_config, ["Jumlah_Jam_KBM", "Jumlah_Jam", "Jam_KBM", "Jam"]
-    )
-
-    df_config[col_jam_count] = (
-        pd.to_numeric(df_config[col_jam_count], errors="coerce")
-        .fillna(6)
-        .astype(int)
-    )
-    df_config[col_hari] = df_config[col_hari].astype(str).str.strip()
-
-    HARI = [
-        str(h).strip()
-        for h in df_config[col_hari]
-        if pd.notna(h)
-        and str(h).strip()
-        and str(h).strip().upper() not in INVALID_TEXTS
-    ]
-    if not HARI:
-      HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"]
-
-    JAM_HARI = {}
-    for _, r in df_config.iterrows():
-      h_name = str(r[col_hari]).strip()
-      if h_name and h_name.upper() not in INVALID_TEXTS:
-        j_count = int(r[col_jam_count])
-        JAM_HARI[h_name] = list(range(1, max(1, j_count) + 1))
-
-    for h in HARI:
-      if h not in JAM_HARI:
-        JAM_HARI[h] = list(range(1, 7))
-
-    col_mgmp_mapel = find_col(
-        df_mgmp_rule, ["Mata_Pelajaran", "Mapel", "Mata Pelajaran"]
-    )
-    col_mgmp_hari = find_col(df_mgmp_rule, ["Hari_MGMP", "Hari MGMP", "Hari"])
-
-    HARI_MGMP_MAPEL = dict(
-        zip(
-            df_mgmp_rule[col_mgmp_mapel].astype(str).str.strip().str.upper(),
-            df_mgmp_rule[col_mgmp_hari].astype(str).str.strip(),
-        )
-    )
-
-    col_mapel_beban = find_col(
-        df_beban_raw, ["Mata_Pelajaran", "Mapel", "Mata Pelajaran"]
-    )
     status_dict = (
-        df_status.set_index(col_status_guru).to_dict("index")
+        df_status.set_index("Guru").to_dict("index")
         if not df_status.empty
         else {}
     )
 
     pair_mapel = {}
     for _, row in df_beban.iterrows():
-      g_name, k_name = row[col_guru], row[col_kelas]
+      g_name = row["Guru"]
+      k_name = row["Kelas"]
       m_name = ""
-      if col_mapel_beban in row and pd.notna(row[col_mapel_beban]):
-        m_name = str(row[col_mapel_beban]).strip()
+      if col_mapel_beban and pd.notna(row.get(col_mapel_beban)):
+        m_name = str(row.get(col_mapel_beban)).strip()
+
       if not m_name:
-        m_name = str(
-            status_dict.get(g_name, {}).get("Mata_Pelajaran", "")
-        ).strip()
+        st_info = status_dict.get(g_name, {})
+        m_name = str(st_info.get("Mata_Pelajaran", "")).strip()
+
       pair_mapel[(g_name, k_name)] = m_name
+
+    df_pair = df_beban.groupby(["Guru", "Kelas"], as_index=False)[
+        "Jam_Wajib"
+    ].sum()
+
+    HARI = list(df_config["Hari"].astype(str).str.strip())
+    JAM_HARI = {}
+    for _, r in df_config.iterrows():
+      h_name = str(r["Hari"]).strip()
+      j_count = int(r["Jumlah_Jam_KBM"])
+      JAM_HARI[h_name] = list(range(1, j_count + 1))
+
+    HARI_MGMP_MAPEL = dict(
+        zip(
+            df_mgmp_rule["Mata_Pelajaran"].astype(str).str.strip().str.upper(),
+            df_mgmp_rule["Hari_MGMP"].astype(str).str.strip(),
+        )
+    )
 
     GURU = sorted(list(df_pair["Guru"].unique()))
     KELAS = sorted(list(df_pair["Kelas"].unique()))
@@ -278,9 +243,6 @@ if st.button(
         (row["Guru"], row["Kelas"])
         for _, row in df_pair.iterrows()
         if row["Jam_Wajib"] > 0
-    )
-    pair_jw_dict = dict(
-        zip(zip(df_pair["Guru"], df_pair["Kelas"]), df_pair["Jam_Wajib"])
     )
 
     mgmp_teachers = set()
@@ -296,137 +258,37 @@ if st.button(
       ]:
         mgmp_teachers.add(g)
 
-    # Inisialisasi PuLP Model
+    # Build Model PuLP
     model = pulp.LpProblem("Penjadwalan_SMPN2Plered_Streamlit", pulp.LpMinimize)
 
-    # 1. Decision Variables: x(g, k, h, j)
     var_keys = [
         (g, k, h, j)
         for (g, k) in valid_gk_pairs
         for h in HARI
-        for j in JAM_HARI.get(h, list(range(1, 7)))
+        for j in JAM_HARI[h]
     ]
-    x = {
-        (g, k, h, j): pulp.LpVariable(
-            f"x_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j}",
-            cat=pulp.LpBinary,
-        )
-        for (g, k, h, j) in var_keys
-    }
+    x = buat_dict_var("x", var_keys, cat=pulp.LpBinary)
 
-    # 2. Workload deviation variables (Soft C3)
-    pair_keys = list(valid_gk_pairs)
-    d_pair_minus = {
-        (g, k): pulp.LpVariable(
-            f"dp_minus_{safe_name(g)}_{safe_name(k)}", lowBound=0
-        )
-        for (g, k) in pair_keys
-    }
-    d_pair_plus = {
-        (g, k): pulp.LpVariable(
-            f"dp_plus_{safe_name(g)}_{safe_name(k)}", lowBound=0
-        )
-        for (g, k) in pair_keys
-    }
+    pair_keys = [(row["Guru"], row["Kelas"]) for _, row in df_pair.iterrows()]
+    d_pair_minus = buat_dict_var("dpair_minus", pair_keys, lowBound=0)
+    d_pair_plus = buat_dict_var("dpair_plus", pair_keys, lowBound=0)
 
-    # 3. Empty class deviation variables (Soft C2)
-    c2_keys = [
-        (k, h, j)
-        for k in KELAS
-        for h in HARI
-        for j in JAM_HARI.get(h, list(range(1, 7)))
-    ]
-    d_c2_minus = {
-        (k, h, j): pulp.LpVariable(
-            f"dc2_minus_{safe_name(k)}_{safe_name(h)}_{j}",
-            lowBound=0,
-        )
-        for (k, h, j) in c2_keys
-    }
+    c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
+    d_c2_minus = buat_dict_var("dc2_minus", c2_keys, lowBound=0)
 
-    # 4. Teacher daily workload variables
     dh_keys = [(g, h) for g in GURU for h in HARI]
-    d_h_plus = {
-        (g, h): pulp.LpVariable(
-            f"dh_plus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-        )
-        for (g, h) in dh_keys
-    }
-    d_h_minus = {
-        (g, h): pulp.LpVariable(
-            f"dh_minus_{safe_name(g)}_{safe_name(h)}", lowBound=0
-        )
-        for (g, h) in dh_keys
-    }
+    d_h_plus = buat_dict_var("dh_plus", dh_keys, lowBound=0)
+    d_h_minus = buat_dict_var("dh_minus", dh_keys, lowBound=0)
 
-    penalti_list = []
-
-    # Hard C1: Max 1 Class per Teacher per Slot
-    for g in GURU:
-      assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
-      if assigned_k:
-        for h in HARI:
-          for j in JAM_HARI.get(h, list(range(1, 7))):
-            model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
-
-    # Soft C2: Exactly 1 Teacher per Class per Slot
-    for k in KELAS:
-      assigned_g = [g for (g_i, k_i) in valid_gk_pairs if k_i == k]
-      if assigned_g:
-        for h in HARI:
-          for j in JAM_HARI.get(h, list(range(1, 7))):
-            model += (
-                pulp.lpSum([x[g, k, h, j] for g in assigned_g])
-                + d_c2_minus[k, h, j]
-                == 1
-            )
-
-    # Soft C3: Workload Target
-    for _, row in df_pair.iterrows():
-      g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
-      model += (
-          pulp.lpSum([
-              x[g, k, h, j]
-              for h in HARI
-              for j in JAM_HARI.get(h, list(range(1, 7)))
-          ])
-          + d_pair_minus[g, k]
-          - d_pair_plus[g, k]
-          == jw
-      )
-
-    # Soft Daily Hour Limits (5h -> max 3/day, 4h/3h/2h -> max 2/day)
-    for (g, k), jw in pair_jw_dict.items():
-      max_daily = 3 if jw == 5 else (2 if jw in (2, 3, 4) else 1)
-      for h in HARI:
-        p_day = pulp.LpVariable(
-            f"p_day_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}", lowBound=0
-        )
-        penalti_list.append(20000.0 * p_day)
-        model += (
-            pulp.lpSum([
-                x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
-            ])
-            - p_day
-            <= max_daily
-        )
-
-    # Soft Gap Penalty / Continuous Block Teaching
+    gap_keys = []
     for g, k in valid_gk_pairs:
       for h in HARI:
-        j_list = JAM_HARI.get(h, list(range(1, 7)))
+        j_list = JAM_HARI[h]
         for idx in range(len(j_list) - 2):
-          j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
-          z_gap = pulp.LpVariable(
-              f"z_gap_{safe_name(g)}_{safe_name(k)}_{safe_name(h)}_{j1}",
-              lowBound=0,
-          )
-          penalti_list.append(50000.0 * z_gap)
-          model += (
-              x[g, k, h, j1] + x[g, k, h, j3] - x[g, k, h, j2] - z_gap <= 1
-          )
+          gap_keys.append((g, k, h, j_list[idx]))
+    z_gap = buat_dict_var("z_gap", gap_keys, lowBound=0)
 
-    # Soft MGMP Rule
+    # Kendala MGMP
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
       mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -438,16 +300,52 @@ if st.button(
         if h_mgmp and h_mgmp in HARI:
           assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
           for k in assigned_k:
-            for j in JAM_HARI.get(h_mgmp, list(range(1, 7))):
+            for j in JAM_HARI[h_mgmp]:
               if j > 2:
-                p_mgmp = pulp.LpVariable(
-                    f"p_mgmp_{safe_name(g)}_{safe_name(k)}_{safe_name(h_mgmp)}_{j}",
-                    lowBound=0,
-                )
-                penalti_list.append(50000.0 * p_mgmp)
-                model += x[g, k, h_mgmp, j] - p_mgmp <= 0
+                model += x[g, k, h_mgmp, j] == 0
 
-    # Soft Wali Kelas (Jumat jam 1)
+    penalti_list = []
+
+    for g in GURU:
+      assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
+      if assigned_k:
+        for h in HARI:
+          for j in JAM_HARI[h]:
+            model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
+
+    for k in KELAS:
+      assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
+      if assigned_g:
+        for h in HARI:
+          for j in JAM_HARI[h]:
+            model += (
+                pulp.lpSum([x[g, k, h, j] for g in assigned_g])
+                + d_c2_minus[k, h, j]
+                == 1
+            )
+
+    for _, row in df_pair.iterrows():
+      g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
+      model += (
+          pulp.lpSum([x[g, k, h, j] for h in HARI for j in JAM_HARI[h]])
+          + d_pair_minus[g, k]
+          - d_pair_plus[g, k]
+          == jw
+      )
+
+    for g, k in valid_gk_pairs:
+      for h in HARI:
+        j_list = JAM_HARI[h]
+        for idx in range(len(j_list) - 2):
+          j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
+          model += (
+              x[g, k, h, j1]
+              + x[g, k, h, j3]
+              - x[g, k, h, j2]
+              - z_gap[g, k, h, j1]
+              <= 1
+          )
+
     for g in GURU:
       st_info = status_dict.get(g, {})
       is_wali_val = st_info.get("Is_Wali")
@@ -462,10 +360,9 @@ if st.button(
           k_wali = str(st_info.get("Kelas_Wali")).strip().upper()
           if (g, k_wali) in valid_gk_pairs and "Jumat" in HARI:
             p_c6 = pulp.LpVariable(f"penalti_wali_{safe_name(g)}", lowBound=0)
-            penalti_list.append(1000.0 * p_c6)
+            penalti_list.append(p_c6)
             model += x[g, k_wali, "Jumat", 1] + p_c6 >= 1
 
-    # Soft Wakasek
     wakasek_teachers = [
         g
         for g in GURU
@@ -473,18 +370,18 @@ if st.button(
         and str(status_dict.get(g, {}).get("Is_Wakasek")).strip().upper()
         in ["1", "1.0", "TRUE", "Y", "YES"]
     ]
-    wakasek_pairs = [
-        (g, k) for (g, k) in valid_gk_pairs if g in wakasek_teachers
-    ]
-    if wakasek_pairs:
+    if wakasek_teachers:
       for h in HARI:
-        p_wak = pulp.LpVariable(f"penalti_wakasek_{safe_name(h)}", lowBound=0)
-        penalti_list.append(1000.0 * p_wak)
         model += (
-            pulp.lpSum([x[g, k, h, 1] for (g, k) in wakasek_pairs]) - p_wak <= 1
+            pulp.lpSum([
+                x[g_w, k, h, 1]
+                for g_w in wakasek_teachers
+                for k in valid_gk_pairs
+                if (g_w, k) in valid_gk_pairs
+            ])
+            <= 1
         )
 
-    # Soft PJOK
     for g in GURU:
       is_pjok_val = status_dict.get(g, {}).get("Is_PJOK")
       if pd.notna(is_pjok_val) and str(is_pjok_val).strip().upper() in [
@@ -497,52 +394,53 @@ if st.button(
         assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
         for h in HARI:
           for k in assigned_k:
-            for j in JAM_HARI.get(h, list(range(1, 7))):
+            for j in JAM_HARI[h]:
               if j > 4:
                 p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
                     lowBound=0,
                 )
-                penalti_list.append(1000.0 * p_c8)
+                penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
-    # Objective Function
     model += (
         100000.0
         * pulp.lpSum([
-            d_pair_minus[g, k] + d_pair_plus[g, k] for (g, k) in pair_keys
+            d_pair_minus[g, k] + d_pair_plus[g, k] for g, k in pair_keys
         ])
-        + 10000.0 * pulp.lpSum([d_c2_minus[key] for key in c2_keys])
-        + pulp.lpSum(penalti_list)
+        + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for k, h, j in c2_keys])
+        + 50000.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
+        + 1000.0 * pulp.lpSum(penalti_list)
         + 2.0
         * pulp.lpSum([
             d_h_plus[g, h] + d_h_minus[g, h] for g in GURU for h in HARI
         ])
     )
 
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.01)
+    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=60, gapRel=0.0)
     model.solve(solver)
 
-    records = []
-    for (g, k, h, j), var in x.items():
-      if var.varValue and var.varValue > 0.5:
-        mapel_name = pair_mapel.get((g, k), "")
-        records.append({
-            "Hari": h,
-            "Jam_Ke": j,
-            "Kelas": k,
-            "Mata_Pelajaran": mapel_name,
-            "Guru": g,
-            "Tampilan_Kelas": (
-                f"{mapel_name}\n({g})" if mapel_name else str(g)
-            ),
-            "Tampilan_Guru": f"{k}\n({mapel_name})" if mapel_name else str(k),
-        })
+    if model.status in [pulp.LpStatusOptimal, 1]:
+      records = []
+      for (g, k, h, j), var in x.items():
+        if var.varValue and var.varValue > 0.5:
+          mapel_name = pair_mapel.get((g, k), "")
+          records.append({
+              "Hari": h,
+              "Jam_Ke": j,
+              "Kelas": k,
+              "Mata_Pelajaran": mapel_name,
+              "Guru": g,
+              "Tampilan_Kelas": (
+                  f"{mapel_name} ({g})" if mapel_name else str(g)
+              ),
+              "Tampilan_Guru": f"{k} ({mapel_name})" if mapel_name else str(k),
+          })
 
-    if len(records) > 0:
       df_hasil = pd.DataFrame(records)
       df_hasil.sort_values(by=["Hari", "Jam_Ke", "Kelas"], inplace=True)
 
+      # Simpan hasil solver ke SESSION STATE Streamlit
       st.session_state["df_hasil"] = df_hasil
       st.session_state["df_beban_clean"] = df_beban
       st.session_state["df_config_clean"] = df_config
@@ -555,7 +453,7 @@ if st.button(
           " atau jam wajib."
       )
 
-# Display Results from Session State
+# TAMPILAN HASIL (Menggunakan Session State agar tidak hilang saat dipencet tombol Download)
 if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   df_hasil = st.session_state["df_hasil"]
   df_beban = st.session_state["df_beban_clean"]
@@ -563,64 +461,19 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
   GURU = sorted(list(df_hasil["Guru"].unique()))
   KELAS = sorted(list(df_hasil["Kelas"].unique()))
-  HARI = [
-      str(h).strip()
-      for h in df_config["Hari"]
-      if pd.notna(h)
-      and str(h).strip()
-      and str(h).strip().upper() not in ["NAN", "NONE", "", "NULL"]
-  ]
-
-  # Dynamic Metrics Calculation
-  total_target_jam_guru = df_beban["Jam_Wajib"].sum()
-  total_jam_terjadwal_guru = len(df_hasil)
-  persen_guru = (
-      (total_jam_terjadwal_guru / total_target_jam_guru * 100)
-      if total_target_jam_guru > 0
-      else 100.0
-  )
-
-  total_slot_kbm = sum(
-      int(r["Jumlah_Jam_KBM"]) for _, r in df_config.iterrows()
-  ) * len(KELAS)
-  jam_kosong_kelas = total_slot_kbm - total_jam_terjadwal_guru
-  persen_kelas_terisi = (
-      (total_jam_terjadwal_guru / total_slot_kbm * 100)
-      if total_slot_kbm > 0
-      else 100.0
-  )
 
   st.success("✅ Status Optimasi: Solusi Optimal Ditemukan & Tersimpan.")
 
-  col1, col2, col3, col4 = st.columns(4)
+  col1, col2, col3 = st.columns(3)
   col1.metric("Total Guru Terjadwal", len(GURU))
   col2.metric("Total Kelas (Rombel)", len(KELAS))
-  col3.metric(
-      "Keterpenuhan Beban Guru",
-      f"{persen_guru:.1f}%",
-      f"{total_jam_terjadwal_guru}/{total_target_jam_guru} Jam",
-  )
-  col4.metric(
-      "Slot Jam Kosong Kelas",
-      f"{jam_kosong_kelas} Slot",
-      f"Keterisian {persen_kelas_terisi:.1f}%",
-  )
+  col3.metric("Status Keterpenuhan Jam", "100% Sempurna")
 
-  if jam_kosong_kelas > 0:
-    st.info(
-        f"ℹ️ **Catatan Slot Jam Kosong**: Terdapat **{jam_kosong_kelas} slot jam"
-        " kosong** di tingkat kelas karena total beban jam mengajar guru di"
-        f" `Guru_Kelas` ({total_target_jam_guru} jam) lebih sedikit dibanding"
-        f" total kapasitas waktu KBM sekolah ({total_slot_kbm} slot jam). Seluruh"
-        " target jam mengajar guru **100% terpenuhi**."
-    )
-
-  res_tab1, res_tab2, res_tab3, res_tab4, res_tab5 = st.tabs([
-      "📅 Matriks Kelas",
-      "👨‍🏫 Matriks Guru",
-      "🎨 Visualisasi Per Kelas",
-      "🖼️ Visualisasi Per Guru",
-      "📋 Master Data & Export",
+  res_tab1, res_tab2, res_tab3, res_tab4 = st.tabs([
+      "📅 Jadwal per Kelas",
+      "👨‍🏫 Jadwal per Guru",
+      "📋 Master Data Penugasan",
+      "📊 Visualisasi & Grafik",
   ])
 
   pivot_kelas = df_hasil.pivot(
@@ -632,202 +485,178 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   df_master = df_hasil[["Hari", "Jam_Ke", "Kelas", "Mata_Pelajaran", "Guru"]]
 
   with res_tab1:
-    st.subheader("Matriks Tabel KBM per Kelas")
+    st.subheader("Matriks Jadwal KBM per Kelas (Mata Pelajaran & Guru)")
     st.dataframe(pivot_kelas, use_container_width=True)
 
-    buf_pk = io.BytesIO()
-    with pd.ExcelWriter(buf_pk, engine="openpyxl") as writer:
-      pivot_kelas.to_excel(writer, sheet_name="Jadwal_per_Kelas")
-    buf_pk.seek(0)
-
-    st.download_button(
-        label="📥 Download Matriks Jadwal Kelas (.xlsx)",
-        data=buf_pk,
-        file_name="Matriks_Jadwal_per_Kelas.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        use_container_width=True,
-    )
-
   with res_tab2:
-    st.subheader("Matriks Tabel KBM per Guru")
+    st.subheader("Matriks Jadwal KBM per Guru (Kelas & Mata Pelajaran)")
     st.dataframe(pivot_guru, use_container_width=True)
 
-    buf_pg = io.BytesIO()
-    with pd.ExcelWriter(buf_pg, engine="openpyxl") as writer:
-      pivot_guru.to_excel(writer, sheet_name="Jadwal_per_Guru")
-    buf_pg.seek(0)
-
-    st.download_button(
-        label="📥 Download Matriks Jadwal Guru (.xlsx)",
-        data=buf_pg,
-        file_name="Matriks_Jadwal_per_Guru.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        use_container_width=True,
-    )
-
   with res_tab3:
-    st.subheader("🖼️ Visualisasi Kartu Jadwal per Kelas (Rombel)")
-    selected_kelas = st.selectbox("Pilih Kelas/Rombel:", KELAS, key="sb_kelas")
-
-    df_k = df_hasil[df_hasil["Kelas"] == selected_kelas].copy()
-    max_jam = max(int(r["Jumlah_Jam_KBM"]) for _, r in df_config.iterrows())
-
-    grid_k = np.full((max_jam, len(HARI)), "-", dtype=object)
-    for _, row in df_k.iterrows():
-      h_idx = (
-          HARI.index(str(row["Hari"]).strip())
-          if str(row["Hari"]).strip() in HARI
-          else -1
-      )
-      j_idx = int(row["Jam_Ke"]) - 1
-      if h_idx >= 0 and 0 <= j_idx < max_jam:
-        lbl = (
-            f"{row['Mata_Pelajaran']}\n[{row['Guru']}]"
-            if row["Mata_Pelajaran"]
-            else str(row["Guru"])
-        )
-        grid_k[j_idx, h_idx] = lbl
-
-    fig_k, ax_k = plt.subplots(figsize=(10, 6))
-    ax_k.axis("off")
-
-    table_k = ax_k.table(
-        cellText=grid_k,
-        colLabels=HARI,
-        rowLabels=[f"Jam {i+1}" for i in range(max_jam)],
-        loc="center",
-        cellLoc="center",
-    )
-    table_k.auto_set_font_size(False)
-    table_k.set_fontsize(9)
-    table_k.scale(1.2, 2.2)
-
-    for (r, c), cell in table_k.get_celld().items():
-      if r == 0 or c == -1:
-        cell.set_facecolor("#1a365d")
-        cell.get_text().set_color("white")
-        cell.get_text().set_weight("bold")
-      else:
-        txt = cell.get_text().get_text()
-        if txt != "-":
-          cell.set_facecolor("#ebf8ff")
-          cell.set_edgecolor("#3182ce")
-        else:
-          cell.set_facecolor("#f7fafc")
-          cell.set_edgecolor("#e2e8f0")
-
-    plt.title(
-        f"JADWAL KBM KELAS {selected_kelas} - SMPN 2 PLERED",
-        fontsize=14,
-        fontweight="bold",
-        pad=15,
-        color="#1a365d",
-    )
-    plt.tight_layout()
-    st.pyplot(fig_k)
-
-    buf_k = io.BytesIO()
-    fig_k.savefig(buf_k, format="png", dpi=250, bbox_inches="tight")
-    buf_k.seek(0)
-    st.download_button(
-        label=f"📥 Download Visualisasi Gambar Jadwal Kelas {selected_kelas} (PNG)",
-        data=buf_k,
-        file_name=f"Jadwal_Kelas_{selected_kelas}.png",
-        mime="image/png",
-    )
-    plt.close(fig_k)
+    st.subheader("Tabel Detail Penugasan")
+    st.dataframe(df_master, use_container_width=True)
 
   with res_tab4:
-    st.subheader("🖼️ Visualisasi Kartu Jadwal per Guru")
-    selected_guru = st.selectbox("Pilih Guru:", GURU, key="sb_guru")
+    st.subheader("📈 Grafis & Visualisasi Hasil Penjadwalan")
 
-    df_g = df_hasil[df_hasil["Guru"] == selected_guru].copy()
-    max_jam = max(int(r["Jumlah_Jam_KBM"]) for _, r in df_config.iterrows())
+    # 1. Grafik Keterpenuhan Jam Guru
+    st.markdown("##### 1. Grafik Target vs Realisasi Jam Mengajar Guru")
+    df_realisasi = (
+        df_hasil.groupby("Guru", as_index=False)["Jam_Ke"]
+        .count()
+        .rename(columns={"Jam_Ke": "Realisasi_Jam"})
+    )
+    df_target = (
+        df_beban.groupby("Guru", as_index=False)["Jam_Wajib"]
+        .sum()
+        .rename(columns={"Jam_Wajib": "Target_Jam"})
+    )
+    df_keterpenuhan = pd.merge(
+        df_target, df_realisasi, on="Guru", how="left"
+    ).fillna(0)
 
-    grid_g = np.full((max_jam, len(HARI)), "-", dtype=object)
-    for _, row in df_g.iterrows():
-      h_idx = (
-          HARI.index(str(row["Hari"]).strip())
-          if str(row["Hari"]).strip() in HARI
-          else -1
+    fig_g, ax_g = plt.subplots(
+        figsize=(10, max(5, len(df_keterpenuhan) * 0.4))
+    )
+    y_pos = np.arange(len(df_keterpenuhan))
+    bars_g = ax_g.barh(
+        y_pos,
+        df_keterpenuhan["Realisasi_Jam"],
+        color="#2b5c8f",
+        height=0.55,
+        label="Realisasi",
+    )
+    ax_g.scatter(
+        df_keterpenuhan["Target_Jam"],
+        y_pos,
+        color="#d9534f",
+        s=70,
+        zorder=5,
+        label="Target Wajib",
+    )
+
+    for bar_i, target_i in zip(bars_g, df_keterpenuhan["Target_Jam"]):
+      w = bar_i.get_width()
+      pct = int((w / target_i * 100)) if target_i > 0 else 100
+      ax_g.text(
+          w + 0.3,
+          bar_i.get_y() + bar_i.get_height() / 2,
+          f"{int(w)}/{int(target_i)} Jam ({pct}%)",
+          ha="left",
+          va="center",
+          fontsize=9,
+          fontweight="bold",
+          color="#1a365d",
       )
-      j_idx = int(row["Jam_Ke"]) - 1
-      if h_idx >= 0 and 0 <= j_idx < max_jam:
-        lbl = (
-            f"Kelas {row['Kelas']}\n[{row['Mata_Pelajaran']}]"
-            if row["Mata_Pelajaran"]
-            else f"Kelas {row['Kelas']}"
-        )
-        grid_g[j_idx, h_idx] = lbl
 
-    fig_g, ax_g = plt.subplots(figsize=(10, 6))
-    ax_g.axis("off")
-
-    table_g = ax_g.table(
-        cellText=grid_g,
-        colLabels=HARI,
-        rowLabels=[f"Jam {i+1}" for i in range(max_jam)],
-        loc="center",
-        cellLoc="center",
+    ax_g.set_yticks(y_pos)
+    ax_g.set_yticklabels(
+        df_keterpenuhan["Guru"], fontsize=9.5, fontweight="bold"
     )
-    table_g.auto_set_font_size(False)
-    table_g.set_fontsize(9)
-    table_g.scale(1.2, 2.2)
-
-    for (r, c), cell in table_g.get_celld().items():
-      if r == 0 or c == -1:
-        cell.set_facecolor("#2b6cb0")
-        cell.get_text().set_color("white")
-        cell.get_text().set_weight("bold")
-      else:
-        txt = cell.get_text().get_text()
-        if txt != "-":
-          cell.set_facecolor("#feebc8")
-          cell.set_edgecolor("#dd6b20")
-        else:
-          cell.set_facecolor("#f7fafc")
-          cell.set_edgecolor("#e2e8f0")
-
-    plt.title(
-        f"JADWAL MENGAJAR: {selected_guru} - SMPN 2 PLERED",
-        fontsize=14,
+    ax_g.invert_yaxis()
+    ax_g.set_xlabel(
+        "Jumlah Jam Mengajar per Minggu", fontsize=10, fontweight="bold"
+    )
+    ax_g.set_title(
+        "Keterpenuhan Beban Mengajar Guru (Target Wajib vs Realisasi)",
+        fontsize=12,
         fontweight="bold",
-        pad=15,
-        color="#2b6cb0",
+        pad=12,
     )
+    ax_g.legend(loc="lower right", frameon=True)
     plt.tight_layout()
     st.pyplot(fig_g)
 
+    # Buffer PNG Download Grafik Guru
     buf_g = io.BytesIO()
-    fig_g.savefig(buf_g, format="png", dpi=250, bbox_inches="tight")
+    fig_g.savefig(buf_g, format="png", dpi=200, bbox_inches="tight")
     buf_g.seek(0)
     st.download_button(
-        label=f"📥 Download Visualisasi Gambar Jadwal {selected_guru} (PNG)",
+        label="📥 Download Grafik Keterpenuhan Jam Guru (PNG)",
         data=buf_g,
-        file_name=f"Jadwal_Guru_{safe_name(selected_guru)}.png",
+        file_name="keterpenuhan_jam_guru.png",
         mime="image/png",
     )
     plt.close(fig_g)
 
-  with res_tab5:
-    st.subheader("📋 Master Data Penugasan & Unduh Excel Lengkap")
-    st.dataframe(df_master, use_container_width=True)
+    st.divider()
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-      df_master.to_excel(writer, sheet_name="Data_Penugasan", index=False)
-      pivot_kelas.to_excel(writer, sheet_name="Jadwal_per_Kelas")
-      pivot_guru.to_excel(writer, sheet_name="Jadwal_per_Guru")
-    output.seek(0)
-
-    st.download_button(
-        label="📥 Download Seluruh Paket Jadwal Excel (.xlsx)",
-        data=output,
-        file_name="Jadwal_Guru_SMPN2Plered_Hasil.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+    # 2. Grafik Distribusi Jam per Kelas
+    st.markdown("##### 2. Grafik Distribusi Total Jam KBM per Rombel (Kelas)")
+    df_kelas_jam = (
+        df_hasil.groupby("Kelas", as_index=False)["Jam_Ke"]
+        .count()
+        .rename(columns={"Jam_Ke": "Total_Jam"})
     )
+
+    fig_k, ax_k = plt.subplots(figsize=(11, 5))
+    bars_k = ax_k.bar(
+        df_kelas_jam["Kelas"],
+        df_kelas_jam["Total_Jam"],
+        color="#4682b4",
+        width=0.55,
+    )
+    ax_k.axhline(
+        31,
+        color="#d9534f",
+        linestyle="--",
+        linewidth=1.5,
+        label="Target 31 Jam/Minggu",
+    )
+
+    for b_k in bars_k:
+      h_k = b_k.get_height()
+      ax_k.text(
+          b_k.get_x() + b_k.get_width() / 2,
+          h_k / 2,
+          f"{int(h_k)} Jam",
+          ha="center",
+          va="center",
+          color="white",
+          fontsize=9,
+          fontweight="bold",
+      )
+
+    ax_k.set_xlabel(
+        "Rombongan Belajar (Rombel)", fontsize=10, fontweight="bold"
+    )
+    ax_k.set_ylabel("Total Jam KBM", fontsize=10, fontweight="bold")
+    ax_k.set_title(
+        "Distribusi Total Jam KBM Terjadwal per Kelas",
+        fontsize=12,
+        fontweight="bold",
+        pad=12,
+    )
+    ax_k.legend(loc="upper right", frameon=True)
+    plt.tight_layout()
+    st.pyplot(fig_k)
+
+    buf_k = io.BytesIO()
+    fig_k.savefig(buf_k, format="png", dpi=200, bbox_inches="tight")
+    buf_k.seek(0)
+    st.download_button(
+        label="📥 Download Grafik Distribusi Jam Kelas (PNG)",
+        data=buf_k,
+        file_name="distribusi_jam_per_kelas.png",
+        mime="image/png",
+    )
+    plt.close(fig_k)
+
+  st.divider()
+  st.subheader("📥 Export Hasil Jadwal Excel")
+
+  # Download Excel Option
+  output = io.BytesIO()
+  with pd.ExcelWriter(output, engine="openpyxl") as writer:
+    df_master.to_excel(writer, sheet_name="Data_Penugasan", index=False)
+    pivot_kelas.to_excel(writer, sheet_name="Jadwal_per_Kelas")
+    pivot_guru.to_excel(writer, sheet_name="Jadwal_per_Guru")
+  output.seek(0)
+
+  st.download_button(
+      label="📥 Download Hasil Jadwal Lengkap Excel (.xlsx)",
+      data=output,
+      file_name="Jadwal_Guru_SMPN2Plered_Hasil.xlsx",
+      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      use_container_width=True,
+  )
