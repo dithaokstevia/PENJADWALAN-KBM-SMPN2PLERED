@@ -238,6 +238,12 @@ if st.button(
         for _, row in df_pair.iterrows()
         if row["Jam_Wajib"] > 0
     )
+    pair_jw_dict = dict(
+        zip(
+            zip(df_pair["Guru"], df_pair["Kelas"]),
+            df_pair["Jam_Wajib"],
+        )
+    )
 
     mgmp_teachers = set()
     for g in GURU:
@@ -282,7 +288,16 @@ if st.button(
           gap_keys.append((g, k, h, j_list[idx]))
     z_gap = buat_dict_var("z_gap", gap_keys, lowBound=0)
 
-    # Kendala
+    # Variabel Penalti Jam Terisolasi (Mencegah 1 Jam Terpisah)
+    iso_keys = [
+        (g, k, h, j)
+        for (g, k) in valid_gk_pairs
+        for h in HARI
+        for j in JAM_HARI[h]
+    ]
+    z_iso = buat_dict_var("z_iso", iso_keys, lowBound=0)
+
+    # Kendala MGMP
     for g in mgmp_teachers:
       st_info = status_dict.get(g, {})
       mapel_raw = str(st_info.get("Mata_Pelajaran", ""))
@@ -326,6 +341,21 @@ if st.button(
           - d_pair_plus[g, k]
           == jw
       )
+
+    # Aturan Maksimal Jam Harian per Mapel & Penalti Jam Terisolasi (Sekali Duduk)
+    for (g, k), jw in pair_jw_dict.items():
+      # Untuk Mapel 4 Jam & 2 Jam: Maksimal 2 jam dalam sehari (memaksa 4 jam jadi 2+2)
+      if jw in [2, 4]:
+        for h in HARI:
+          model += pulp.lpSum([x[g, k, h, j] for j in JAM_HARI[h]]) <= 2
+
+      # Mencegah jam berdiri sendiri (isolated 1 hour)
+      for h in HARI:
+        j_list = JAM_HARI[h]
+        for j in j_list:
+          left = x[g, k, h, j - 1] if (j - 1) in j_list else 0
+          right = x[g, k, h, j + 1] if (j + 1) in j_list else 0
+          model += z_iso[g, k, h, j] >= x[g, k, h, j] - left - right
 
     for g, k in valid_gk_pairs:
       for h in HARI:
@@ -397,11 +427,13 @@ if st.button(
                 penalti_list.append(p_c8)
                 model += x[g, k, h, j] - p_c8 <= 0
 
+    # Fungsi Tujuan dengan Penalti Jam Terisolasi (75.000)
     model += (
         100000.0
         * pulp.lpSum([
             d_pair_minus[g, k] + d_pair_plus[g, k] for g, k in pair_keys
         ])
+        + 75000.0 * pulp.lpSum([z_iso[key] for key in iso_keys])
         + 10000.0 * pulp.lpSum([d_c2_minus[k, h, j] for k, h, j in c2_keys])
         + 50000.0 * pulp.lpSum([z_gap[key] for key in gap_keys])
         + 1000.0 * pulp.lpSum(penalti_list)
@@ -485,9 +517,39 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     st.subheader("Matriks Tabel KBM per Kelas")
     st.dataframe(pivot_kelas, use_container_width=True)
 
+    buf_pk = io.BytesIO()
+    with pd.ExcelWriter(buf_pk, engine="openpyxl") as writer:
+      pivot_kelas.to_excel(writer, sheet_name="Jadwal_per_Kelas")
+    buf_pk.seek(0)
+
+    st.download_button(
+        label="📥 Download Matriks Jadwal Kelas (.xlsx)",
+        data=buf_pk,
+        file_name="Matriks_Jadwal_per_Kelas.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        use_container_width=True,
+    )
+
   with res_tab2:
     st.subheader("Matriks Tabel KBM per Guru")
     st.dataframe(pivot_guru, use_container_width=True)
+
+    buf_pg = io.BytesIO()
+    with pd.ExcelWriter(buf_pg, engine="openpyxl") as writer:
+      pivot_guru.to_excel(writer, sheet_name="Jadwal_per_Guru")
+    buf_pg.seek(0)
+
+    st.download_button(
+        label="📥 Download Matriks Jadwal Guru (.xlsx)",
+        data=buf_pg,
+        file_name="Matriks_Jadwal_per_Guru.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        use_container_width=True,
+    )
 
   with res_tab3:
     st.subheader("🖼️ Visualisasi Kartu Jadwal per Kelas (Rombel)")
@@ -546,12 +608,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     plt.tight_layout()
     st.pyplot(fig_k)
 
-    # Download PNG Button for Class Schedule
     buf_k = io.BytesIO()
     fig_k.savefig(buf_k, format="png", dpi=250, bbox_inches="tight")
     buf_k.seek(0)
     st.download_button(
-        label=f"📥 Download Visualisasi Jadwal Kelas {selected_kelas} (PNG)",
+        label=f"📥 Download Visualisasi Gambar Jadwal Kelas {selected_kelas} (PNG)",
         data=buf_k,
         file_name=f"Jadwal_Kelas_{selected_kelas}.png",
         mime="image/png",
@@ -615,12 +676,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     plt.tight_layout()
     st.pyplot(fig_g)
 
-    # Download PNG Button for Teacher Schedule
     buf_g = io.BytesIO()
     fig_g.savefig(buf_g, format="png", dpi=250, bbox_inches="tight")
     buf_g.seek(0)
     st.download_button(
-        label=f"📥 Download Visualisasi Jadwal {selected_guru} (PNG)",
+        label=f"📥 Download Visualisasi Gambar Jadwal {selected_guru} (PNG)",
         data=buf_g,
         file_name=f"Jadwal_Guru_{safe_name(selected_guru)}.png",
         mime="image/png",
@@ -628,7 +688,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     plt.close(fig_g)
 
   with res_tab5:
-    st.subheader("📋 Master Data Penugasan & Unduh Excel")
+    st.subheader("📋 Master Data Penugasan & Unduh Excel Lengkap")
     st.dataframe(df_master, use_container_width=True)
 
     output = io.BytesIO()
@@ -639,7 +699,7 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
     output.seek(0)
 
     st.download_button(
-        label="📥 Download Seluruh Jadwal Excel (.xlsx)",
+        label="📥 Download Seluruh Paket Jadwal Excel (.xlsx)",
         data=output,
         file_name="Jadwal_Guru_SMPN2Plered_Hasil.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
