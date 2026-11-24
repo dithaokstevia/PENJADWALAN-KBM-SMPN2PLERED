@@ -178,7 +178,7 @@ if st.button(
         .astype(int)
     )
 
-    # Sanitasi df_config agar Jumlah_Jam_KBM dijamin angka integer murni (Bebas ValueError)
+    # Sanitasi df_config (Aman dari ValueError dan KeyError)
     df_config["Jumlah_Jam_KBM"] = (
         pd.to_numeric(df_config["Jumlah_Jam_KBM"], errors="coerce")
         .fillna(6)
@@ -225,12 +225,21 @@ if st.button(
         "Jam_Wajib"
     ].sum()
 
-    HARI = list(df_config["Hari"])
+    HARI = [h for h in df_config["Hari"] if h and h.upper() not in INVALID_TEXTS]
+    if not HARI:
+      HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"]
+
     JAM_HARI = {}
     for _, r in df_config.iterrows():
-      h_name = str(r["Hari"])
-      j_count = int(r["Jumlah_Jam_KBM"])
-      JAM_HARI[h_name] = list(range(1, j_count + 1))
+      h_name = str(r["Hari"]).strip()
+      if h_name and h_name.upper() not in INVALID_TEXTS:
+        j_count = int(r["Jumlah_Jam_KBM"])
+        JAM_HARI[h_name] = list(range(1, max(1, j_count) + 1))
+
+    # Fallback jika ada hari yang belum terdaftar di JAM_HARI
+    for h in HARI:
+      if h not in JAM_HARI:
+        JAM_HARI[h] = list(range(1, 7))
 
     HARI_MGMP_MAPEL = dict(
         zip(
@@ -273,7 +282,7 @@ if st.button(
         (g, k, h, j)
         for (g, k) in valid_gk_pairs
         for h in HARI
-        for j in JAM_HARI[h]
+        for j in JAM_HARI.get(h, list(range(1, 7)))
     ]
     x = buat_dict_var("x", var_keys, cat=pulp.LpBinary)
 
@@ -281,7 +290,12 @@ if st.button(
     d_pair_minus = buat_dict_var("dpair_minus", pair_keys, lowBound=0)
     d_pair_plus = buat_dict_var("dpair_plus", pair_keys, lowBound=0)
 
-    c2_keys = [(k, h, j) for k in KELAS for h in HARI for j in JAM_HARI[h]]
+    c2_keys = [
+        (k, h, j)
+        for k in KELAS
+        for h in HARI
+        for j in JAM_HARI.get(h, list(range(1, 7)))
+    ]
     d_c2_minus = buat_dict_var("dc2_minus", c2_keys, lowBound=0)
 
     dh_keys = [(g, h) for g in GURU for h in HARI]
@@ -291,7 +305,7 @@ if st.button(
     gap_keys = []
     for g, k in valid_gk_pairs:
       for h in HARI:
-        j_list = JAM_HARI[h]
+        j_list = JAM_HARI.get(h, list(range(1, 7)))
         for idx in range(len(j_list) - 2):
           gap_keys.append((g, k, h, j_list[idx]))
     z_gap = buat_dict_var("z_gap", gap_keys, lowBound=0)
@@ -301,7 +315,7 @@ if st.button(
         (g, k, h, j)
         for (g, k) in valid_gk_pairs
         for h in HARI
-        for j in JAM_HARI[h]
+        for j in JAM_HARI.get(h, list(range(1, 7)))
     ]
     z_iso = buat_dict_var("z_iso", iso_keys, lowBound=0)
 
@@ -317,7 +331,7 @@ if st.button(
         if h_mgmp and h_mgmp in HARI:
           assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
           for k in assigned_k:
-            for j in JAM_HARI[h_mgmp]:
+            for j in JAM_HARI.get(h_mgmp, list(range(1, 7))):
               if j > 2:
                 model += x[g, k, h_mgmp, j] == 0
 
@@ -327,14 +341,14 @@ if st.button(
       assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
       if assigned_k:
         for h in HARI:
-          for j in JAM_HARI[h]:
+          for j in JAM_HARI.get(h, list(range(1, 7))):
             model += pulp.lpSum([x[g, k, h, j] for k in assigned_k]) <= 1
 
     for k in KELAS:
       assigned_g = [g for (g, k_i) in valid_gk_pairs if k_i == k]
       if assigned_g:
         for h in HARI:
-          for j in JAM_HARI[h]:
+          for j in JAM_HARI.get(h, list(range(1, 7))):
             model += (
                 pulp.lpSum([x[g, k, h, j] for g in assigned_g])
                 + d_c2_minus[k, h, j]
@@ -344,7 +358,11 @@ if st.button(
     for _, row in df_pair.iterrows():
       g, k, jw = row["Guru"], row["Kelas"], row["Jam_Wajib"]
       model += (
-          pulp.lpSum([x[g, k, h, j] for h in HARI for j in JAM_HARI[h]])
+          pulp.lpSum([
+              x[g, k, h, j]
+              for h in HARI
+              for j in JAM_HARI.get(h, list(range(1, 7)))
+          ])
           + d_pair_minus[g, k]
           - d_pair_plus[g, k]
           == jw
@@ -354,10 +372,15 @@ if st.button(
     for (g, k), jw in pair_jw_dict.items():
       if jw in (2, 4):
         for h in HARI:
-          model += pulp.lpSum([x[g, k, h, j] for j in JAM_HARI[h]]) <= 2
+          model += (
+              pulp.lpSum([
+                  x[g, k, h, j] for j in JAM_HARI.get(h, list(range(1, 7)))
+              ])
+              <= 2
+          )
 
       for h in HARI:
-        j_list = JAM_HARI[h]
+        j_list = JAM_HARI.get(h, list(range(1, 7)))
         for j in j_list:
           left = x[g, k, h, j - 1] if (j - 1) in j_list else 0
           right = x[g, k, h, j + 1] if (j + 1) in j_list else 0
@@ -365,7 +388,7 @@ if st.button(
 
     for g, k in valid_gk_pairs:
       for h in HARI:
-        j_list = JAM_HARI[h]
+        j_list = JAM_HARI.get(h, list(range(1, 7)))
         for idx in range(len(j_list) - 2):
           j1, j2, j3 = j_list[idx], j_list[idx + 1], j_list[idx + 2]
           model += (
@@ -424,7 +447,7 @@ if st.button(
         assigned_k = [k for (g_i, k) in valid_gk_pairs if g_i == g]
         for h in HARI:
           for k in assigned_k:
-            for j in JAM_HARI[h]:
+            for j in JAM_HARI.get(h, list(range(1, 7))):
               if j > 4:
                 p_c8 = pulp.LpVariable(
                     f"penalti_pjok_{safe_name(g)}_{safe_name(h)}_{safe_name(k)}_{j}",
@@ -494,7 +517,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
   GURU = sorted(list(df_hasil["Guru"].unique()))
   KELAS = sorted(list(df_hasil["Kelas"].unique()))
-  HARI = list(df_config["Hari"])
+  HARI = [
+      h
+      for h in df_config["Hari"].astype(str).str.strip()
+      if h and h.upper() not in ["NAN", "NONE", "", "NULL"]
+  ]
 
   st.success("✅ Status Optimasi: Solusi Optimal Ditemukan & Tersimpan.")
 
