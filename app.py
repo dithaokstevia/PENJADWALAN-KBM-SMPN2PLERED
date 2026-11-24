@@ -36,10 +36,10 @@ elif os.path.exists(default_file):
 else:
   excel_path = None
 
-# Initial DataFrames dengan nilai tuple aman
+# Initial DataFrames dengan nilai default aman jika file belum diunggah
 df_config_init = pd.DataFrame({
     "Hari": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
-    "Jumlah_Jam_KBM": (7, 6, 6, 6, 6),
+    "Jumlah_Jam_KBM": [7, 6, 6, 6, 6],
 })
 df_mgmp_init = pd.DataFrame({
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
@@ -58,7 +58,7 @@ df_beban_init = pd.DataFrame({
     "Guru": ["Guru A", "Guru B"],
     "Kelas": ["7A", "7B"],
     "Mata_Pelajaran": ["IPA", "MATEMATIKA"],
-    "Jam_Wajib": (4, 4),
+    "Jam_Wajib": [4, 4],
 })
 
 if excel_path is not None:
@@ -531,12 +531,49 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
       and str(h).strip().upper() not in ["NAN", "NONE", "", "NULL"]
   ]
 
+  # Perhitungan Metrik Dinamis
+  total_target_jam_guru = df_beban["Jam_Wajib"].sum()
+  total_jam_terjadwal_guru = len(df_hasil)
+  persen_guru = (
+      (total_jam_terjadwal_guru / total_target_jam_guru * 100)
+      if total_target_jam_guru > 0
+      else 100.0
+  )
+
+  total_slot_kbm = sum(
+      int(r["Jumlah_Jam_KBM"]) for _, r in df_config.iterrows()
+  ) * len(KELAS)
+  jam_kosong_kelas = total_slot_kbm - total_jam_terjadwal_guru
+  persen_kelas_terisi = (
+      (total_jam_terjadwal_guru / total_slot_kbm * 100)
+      if total_slot_kbm > 0
+      else 100.0
+  )
+
   st.success("✅ Status Optimasi: Solusi Optimal Ditemukan & Tersimpan.")
 
-  col1, col2, col3 = st.columns(3)
+  col1, col2, col3, col4 = st.columns(4)
   col1.metric("Total Guru Terjadwal", len(GURU))
   col2.metric("Total Kelas (Rombel)", len(KELAS))
-  col3.metric("Status Keterpenuhan Jam", "100% Sempurna")
+  col3.metric(
+      "Keterpenuhan Beban Guru",
+      f"{persen_guru:.1f}%",
+      f"{total_jam_terjadwal_guru}/{total_target_jam_guru} Jam",
+  )
+  col4.metric(
+      "Slot Jam Kosong Kelas",
+      f"{jam_kosong_kelas} Slot",
+      f"Keterisian {persen_kelas_terisi:.1f}%",
+  )
+
+  if jam_kosong_kelas > 0:
+    st.info(
+        f"ℹ️ **Catatan Slot Jam Kosong**: Terdapat **{jam_kosong_kelas} slot jam"
+        " kosong** di tingkat kelas karena total beban jam mengajar guru di"
+        f" `Guru_Kelas` ({total_target_jam_guru} jam) lebih sedikit dibanding"
+        f" total kapasitas waktu KBM sekolah ({total_slot_kbm} slot jam). Seluruh"
+        " target jam mengajar guru **100% terpenuhi**."
+    )
 
   res_tab1, res_tab2, res_tab3, res_tab4, res_tab5 = st.tabs([
       "📅 Matriks Kelas",
