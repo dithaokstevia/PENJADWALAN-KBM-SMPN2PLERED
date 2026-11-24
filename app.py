@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pulp
-import seaborn as sns
 import streamlit as st
 
 st.set_page_config(
@@ -164,6 +163,8 @@ if st.button(
     use_container_width=True,
 ):
   with st.spinner("Sedang memproses solver PuLP (Branch-and-Bound)..."):
+    INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
+
     # Preprocess Data Beban & Status
     df_beban_raw["Guru"] = (
         df_beban_raw["Guru"].replace(r"^\s*$", None, regex=True).ffill()
@@ -178,7 +179,7 @@ if st.button(
         .astype(int)
     )
 
-    # Sanitasi df_config (Aman dari ValueError dan KeyError)
+    # Sanitasi df_config
     df_config["Jumlah_Jam_KBM"] = (
         pd.to_numeric(df_config["Jumlah_Jam_KBM"], errors="coerce")
         .fillna(6)
@@ -192,7 +193,6 @@ if st.button(
         else ("Mapel" if "Mapel" in df_beban_raw.columns else None)
     )
 
-    INVALID_TEXTS = ["NAN", "NONE", "", "NULL", "GURU", "KELAS", "UNNAMED: 0"]
     df_beban = df_beban_raw[
         (~df_beban_raw["Guru"].str.upper().isin(INVALID_TEXTS))
         & (~df_beban_raw["Kelas"].isin(INVALID_TEXTS))
@@ -225,7 +225,13 @@ if st.button(
         "Jam_Wajib"
     ].sum()
 
-    HARI = [h for h in df_config["Hari"] if h and h.upper() not in INVALID_TEXTS]
+    HARI = [
+        str(h).strip()
+        for h in df_config["Hari"]
+        if pd.notna(h)
+        and str(h).strip()
+        and str(h).strip().upper() not in INVALID_TEXTS
+    ]
     if not HARI:
       HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"]
 
@@ -518,9 +524,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
   GURU = sorted(list(df_hasil["Guru"].unique()))
   KELAS = sorted(list(df_hasil["Kelas"].unique()))
   HARI = [
-      h
-      for h in df_config["Hari"].astype(str).str.strip()
-      if h and h.upper() not in ["NAN", "NONE", "", "NULL"]
+      str(h).strip()
+      for h in df_config["Hari"]
+      if pd.notna(h)
+      and str(h).strip()
+      and str(h).strip().upper() not in ["NAN", "NONE", "", "NULL"]
   ]
 
   st.success("✅ Status Optimasi: Solusi Optimal Ditemukan & Tersimpan.")
@@ -593,7 +601,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
     grid_k = np.full((max_jam, len(HARI)), "-", dtype=object)
     for _, row in df_k.iterrows():
-      h_idx = HARI.index(row["Hari"]) if row["Hari"] in HARI else -1
+      h_idx = (
+          HARI.index(str(row["Hari"]).strip())
+          if str(row["Hari"]).strip() in HARI
+          else -1
+      )
       j_idx = int(row["Jam_Ke"]) - 1
       if h_idx >= 0 and 0 <= j_idx < max_jam:
         lbl = (
@@ -661,7 +673,11 @@ if st.session_state["solved"] and st.session_state["df_hasil"] is not None:
 
     grid_g = np.full((max_jam, len(HARI)), "-", dtype=object)
     for _, row in df_g.iterrows():
-      h_idx = HARI.index(row["Hari"]) if row["Hari"] in HARI else -1
+      h_idx = (
+          HARI.index(str(row["Hari"]).strip())
+          if str(row["Hari"]).strip() in HARI
+          else -1
+      )
       j_idx = int(row["Jam_Ke"]) - 1
       if h_idx >= 0 and 0 <= j_idx < max_jam:
         lbl = (
